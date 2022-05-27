@@ -467,7 +467,7 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, 170, 200, 40):
                     menuState = MenuState.KeySetting
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, 220, 200, 40):
-                    pass
+                    menuState = MenuState.ScoreBoard
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, 270, 200, 40):
                     menuState = MenuState.Help
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
@@ -485,7 +485,13 @@ class GameManager:
                     listener = lambda keyCode : setDropFastKey(keyCode)
                 elif isCollideIn(pos, SCREEN_WIDTH / 2 + 250, 180, 80, 30):
                     listener = lambda keyCode : setPauseKey(keyCode)
-                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 40, 200, 40):
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    menuState = MenuState.Setting
+            elif menuState == MenuState.Help:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    menuState = MenuState.Setting
+            elif menuState == MenuState.ScoreBoard:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     menuState = MenuState.Setting
         elif appState is AppState.Run:
             if gameState is GameState.GameOver:
@@ -527,12 +533,22 @@ class GameManager:
                 displayInterectibleTextRect(pos, pygame.key.name(KEY_FAST_DROP).upper(), SCREEN_WIDTH / 2 + 250, 130, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayText("Pause", SCREEN_WIDTH / 2 + 100, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, pygame.key.name(KEY_PAUSE).upper(), SCREEN_WIDTH / 2 + 250, 180, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 40, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Setting:
                 displayText("Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Key Setting", SCREEN_WIDTH / 2, 170, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Score Board", SCREEN_WIDTH / 2, 220, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Help", SCREEN_WIDTH / 2, 270, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.ScoreBoard:
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.Help:
+                displayText("Help", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("move block to fill line", SCREEN_WIDTH / 2, 120, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("try not to fill screen", SCREEN_WIDTH / 2, 150, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("you can play both sole", SCREEN_WIDTH / 2, 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("and even with your friend!", SCREEN_WIDTH / 2, 230, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("please enjoy this game", SCREEN_WIDTH / 2, 280, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
         elif appState is AppState.Run:
             if gameState is GameState.GameOver:
