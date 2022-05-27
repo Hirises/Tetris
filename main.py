@@ -3,17 +3,24 @@ import sys
 import random
 from enum import Enum
 
-class CellState(Enum):
-    Empty = 0
-    Occupied = 1
 class AppState(Enum):
     Menu = 0
     Run = 1
 class GameState(Enum):
+    GameOver = -1
     Pause = 0
     Drop = 1
     WaitNewBlock = 2
     Animating = 3
+class MenuState(Enum):
+    Main = 0
+    Setting = 1
+    Help = 2
+    KeySetting = 3
+    ScoreBoard = 4
+class CellState(Enum):
+    Empty = 0
+    Occupied = 1
 
 SCREEN_WIDTH = 600
 SCREEN_HEIGTH = 400
@@ -31,7 +38,13 @@ ACCELERATED_TICK_PRE_CELL = 2
 TICK_PER_CELL = DEFAULT_TICK_PER_CELL
 KEY_INPUT_DELAY = 7
 KEY_INPUT_REPEAT = 3
-ALL_CHECKING_KEYS = [pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s, pygame.K_SPACE]
+KEY_RIGHT = pygame.K_d
+KEY_LEFT = pygame.K_a
+KEY_TURN_RIGHT = pygame.K_w
+KEY_TURN_LEFT = pygame.K_s
+KEY_FAST_DROP = pygame.K_SPACE
+KEY_PAUSE = pygame.K_q
+ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
 ALL_BLOCK_STATES = [
     [[CellState.Occupied, CellState.Occupied],
      [CellState.Occupied, CellState.Occupied]],
@@ -68,10 +81,13 @@ manager = None
 #게임 변수
 gameState = GameState.WaitNewBlock
 appState = AppState.Menu
+menuState = MenuState.Main
 score = 0
 curBlock = None
 pressedKey = {}
 lastX = 0
+lastState = GameState.WaitNewBlock
+listener = None
 
 def randomBit():
     if random.randint(0, 1) == 0:
@@ -100,14 +116,64 @@ def displayText(string, x, y, size = 40, font = "arial", color = (0, 0, 0)):
     rect.center = (x, y)
     screen.blit(text, rect)
 
-def displayTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial", color = (0, 0, 0), backgroundColor = (255, 255, 255)):
-    pygame.draw.rect(screen, backgroundColor, 
-                     (x - dx / 2, y - dy / 2, dx, dy))
+def displayTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial",
+                    color = (0, 0, 0), backgroundColor = (255, 255, 255)):
+    pygame.draw.rect(screen, backgroundColor, (x - dx / 2, y - dy / 2, dx, dy))
     font = pygame.font.SysFont(font, size)
     text = font.render(string, True, color)
     rect = text.get_rect()
     rect.center = (x, y)
     screen.blit(text, rect)
+    
+def isCollideIn(pos, x, y, dx, dy):
+    posX = pos[0]
+    posY = pos[1]
+    leftX = x - dx / 2
+    rightX = x + dx / 2
+    upY = y + dy / 2
+    downY = y - dy / 2
+    
+    return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
+    
+def displayInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain = 1.1, font = "arial",
+                                color = (0, 0, 0), backgroundColor = (255, 255, 255),
+                                newColor = (0, 0, 0), newBackgroundColor = (200, 200, 200)):
+    
+    if isCollideIn(pos, x, y, dx, dy):
+        displayTextRect(string, x, y, int(dx * gain), int(dy * gain), int(size * gain), font, newColor, newBackgroundColor)
+    else:
+        displayTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
+
+def setLeftMoveKey(keyCode):
+    global KEY_LEFT
+    global listener
+    listener = None
+    KEY_LEFT = keyCode
+def setRightMoveKey(keyCode):
+    global KEY_RIGHT
+    global listener
+    listener = None
+    KEY_RIGHT = keyCode
+def setLeftTurnKey(keyCode):
+    global KEY_TURN_LEFT
+    global listener
+    listener = None
+    KEY_TURN_LEFT = keyCode
+def setRightTurnKey(keyCode):
+    global KEY_TURN_RIGHT
+    global listener
+    listener = None
+    KEY_TURN_RIGHT = keyCode
+def setDropFastKey(keyCode):
+    global KEY_FAST_DROP
+    global listener
+    listener = None
+    KEY_FAST_DROP = keyCode
+def setPauseKey(keyCode):
+    global KEY_PAUSE
+    global listener
+    listener = None
+    KEY_PAUSE = keyCode
 
 #블럭 객체 - 왼쪽 위가 (0, 0)
 class Block:
@@ -123,8 +189,9 @@ class Block:
         self.color = color
     
         self.y -= len(self.curState[0]) - 1
-        if self.x + len(self.curState) - 1 >= HORIZONTAL_CELL_COUNT:
-            self.x -= self.x + len(self.curState) - HORIZONTAL_CELL_COUNT - 1
+        
+        if self.x + len(self.curState) > HORIZONTAL_CELL_COUNT:
+            self.x = HORIZONTAL_CELL_COUNT - len(self.curState)
             
         if self.isColideWith(self.curState, self.x, self.y):
             manager.gameEnd()
@@ -200,7 +267,7 @@ class Block:
     def move(self, dx, dy):
         if self.isColideWith(self.curState, self.x + dx, self.y + dy):
             return
-            
+        
         self.x += dx
         self.y += dy
         
@@ -218,6 +285,7 @@ class Block:
                     cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
         
         if self.y - len(self.curState[0]) + 1 < 0:
+            self.y -= 1
             manager.gameEnd()
             return
         
@@ -244,6 +312,8 @@ class Block:
         
     def isColideWith(self, state, locX, locY):
         if locX < 0:
+            return True
+        if locX + len(state) > HORIZONTAL_CELL_COUNT:
             return True
         
         for x in range(0, len(state)):
@@ -277,20 +347,25 @@ class GameManager:
     
     def gameStart(self):
         global gameState
+        global appState
         
         self.gameReset()
-        gameState.WaitNewBlock
+        gameState = GameState.WaitNewBlock
+        appState = AppState.Run
     
     def gameReset(self):
         global score
         global cells
         global curBlock
         global gameState
+        global lastX
         
-        gameState.WaitNewBlock
+        lastX = 0
+        gameState = gameState.WaitNewBlock
         self.tick = 0
         curBlock = None
         score = 0
+        cells.clear()
         for x in range(0, HORIZONTAL_CELL_COUNT):
             tmp = []
             for y in range(0, VERTICAL_CELL_COUNT):
@@ -300,47 +375,56 @@ class GameManager:
     def gameEnd(self):
         global gameState
         
-        gameState = GameState.Pause
+        gameState = GameState.GameOver
     
     def keyUp(self, keyCode):
         global TICK_PER_CELL
         
-        if keyCode == pygame.K_SPACE:
+        if keyCode == KEY_FAST_DROP:
             TICK_PER_CELL = DEFAULT_TICK_PER_CELL
     
     def keyPressed(self, keyCode):
         if not appState is AppState.Run:
             return
         
-        if keyCode == pygame.K_a:
+        if keyCode == KEY_LEFT:
             if not curBlock is None:
                 curBlock.move(-1, 0)
-        if keyCode == pygame.K_d:
+        if keyCode == KEY_RIGHT:
             if not curBlock is None:
                 curBlock.move(1, 0)
     
     def keyDown(self, keyCode):
         global TICK_PER_CELL
+        global gameState
+        global lastState
         
-        if keyCode == pygame.K_SPACE:
+        if keyCode == KEY_FAST_DROP:
             TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
         
         if not appState is AppState.Run:
             return
         
-        if keyCode == pygame.K_a:
+        if keyCode == KEY_LEFT:
             if not curBlock is None:
                 curBlock.move(-1, 0)
-        if keyCode == pygame.K_d:
+        if keyCode == KEY_RIGHT:
             if not curBlock is None:
                 curBlock.move(1, 0)
             
-        if keyCode == pygame.K_w:
+        if keyCode == KEY_TURN_LEFT:
             if not curBlock is None:
                 curBlock.turnLeft()
-        if keyCode == pygame.K_s:
+        if keyCode == KEY_TURN_RIGHT:
             if not curBlock is None:
                 curBlock.turnRight()
+        if keyCode == KEY_PAUSE:
+            if not gameState is GameState.GameOver:
+                if gameState is GameState.Pause:
+                    gameState = lastState
+                else:
+                    lastState = gameState
+                    gameState = GameState.Pause
     
     def update(self):
         if appState is AppState.Run:
@@ -349,7 +433,7 @@ class GameManager:
             if curBlock is None and gameState is GameState.WaitNewBlock:
                 self.spawnNewBlock()
             
-            if self.tick % TICK_PER_CELL == 0:
+            if self.tick % TICK_PER_CELL == 0 and gameState is GameState.Drop:
                 curBlock.fall()
     
     def spawnNewBlock(self):
@@ -361,14 +445,109 @@ class GameManager:
                          dirZ = randomBit(), dirX = randomBit(), dirY = randomBit(), x = lastX)
         gameState = GameState.Drop
      
-    def drawUI(self):
+    def mouseUp(self):
+        global appState
+        global menuState
+        global gameState
+        global listener
+        
+        pos = pygame.mouse.get_pos()
+        
         if appState is AppState.Menu:
-            displayText("Tetris", SCREEN_WIDTH / 2, 100, size = 50, color = (255, 255, 255))
-            displayTextRect("New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50))
-            displayTextRect("Help", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50))
-            displayTextRect("Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50))
+            if menuState is MenuState.Main:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40):
+                    self.gameReset()
+                    self.gameStart()
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40):
+                    menuState = MenuState.Setting
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    pygame.quit()
+                    sys.exit()
+            elif menuState is MenuState.Setting:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, 170, 200, 40):
+                    menuState = MenuState.KeySetting
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, 220, 200, 40):
+                    pass
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, 270, 200, 40):
+                    menuState = MenuState.Help
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    menuState = MenuState.Main
+            elif menuState is MenuState.KeySetting:
+                if isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 130, 80, 30):
+                    listener = lambda keyCode : setLeftMoveKey(keyCode)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 180, 80, 30):
+                    listener = lambda keyCode : setRightMoveKey(keyCode)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 230, 80, 30):
+                    listener = lambda keyCode : setLeftTurnKey(keyCode)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 280, 80, 30):
+                    listener = lambda keyCode : setRightTurnKey(keyCode)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 250, 130, 80, 30):
+                    listener = lambda keyCode : setDropFastKey(keyCode)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 250, 180, 80, 30):
+                    listener = lambda keyCode : setPauseKey(keyCode)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 40, 200, 40):
+                    menuState = MenuState.Setting
         elif appState is AppState.Run:
-            displayText(str(score), 500, 50)
+            if gameState is GameState.GameOver:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
+                    self.gameReset()
+                    self.gameStart()
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40):
+                    menuState = MenuState.Main
+                    appState = AppState.Menu
+            elif gameState is GameState.Pause:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40):
+                    gameState = lastState
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40):
+                    self.gameReset()
+                    self.gameStart()
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40):
+                    menuState = MenuState.Main
+                    appState = AppState.Menu
+     
+    def drawUI(self):
+        pos = pygame.mouse.get_pos()
+        if appState is AppState.Menu:
+            if menuState is MenuState.Main:
+                displayText("Tetris", SCREEN_WIDTH / 2, 100, size = 60, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.KeySetting:
+                displayText("Key Setting", SCREEN_WIDTH / 2, 50, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("Move Left", SCREEN_WIDTH / 2 - 200, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_LEFT).upper(), SCREEN_WIDTH / 2 - 50, 130, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayText("Move Right", SCREEN_WIDTH / 2 - 200, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_RIGHT).upper(), SCREEN_WIDTH / 2 - 50, 180, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayText("Turn Left", SCREEN_WIDTH / 2 - 200, 230, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_LEFT).upper(), SCREEN_WIDTH / 2 - 50, 230, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayText("Turn Right", SCREEN_WIDTH / 2 - 200, 280, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_RIGHT).upper(), SCREEN_WIDTH / 2 - 50, 280, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayText("Drop Fast", SCREEN_WIDTH / 2 + 100, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_FAST_DROP).upper(), SCREEN_WIDTH / 2 + 250, 130, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayText("Pause", SCREEN_WIDTH / 2 + 100, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_PAUSE).upper(), SCREEN_WIDTH / 2 + 250, 180, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 40, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.Setting:
+                displayText("Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Key Setting", SCREEN_WIDTH / 2, 170, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Score Board", SCREEN_WIDTH / 2, 220, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Help", SCREEN_WIDTH / 2, 270, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+        elif appState is AppState.Run:
+            if gameState is GameState.GameOver:
+                displayText("Game Over", SCREEN_WIDTH / 2, 100, size = 60, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("score " + str(score), SCREEN_WIDTH / 2, 170, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif gameState is GameState.Pause:
+                displayText("Paused", SCREEN_WIDTH / 2, 100, size = 60, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("score " + str(score), SCREEN_WIDTH / 2, 170, size = 30, color = (255, 255, 255), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Continue", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            else:
+                displayText(str(score), 500, 50, color = (255, 255, 255), font = "hancommalangmalang")
         
     def drawScreen(self):
         if appState is AppState.Run:
@@ -425,14 +604,20 @@ for x in range(0, HORIZONTAL_CELL_COUNT):
         tmp.append(Cell())
     cells.append(tmp)
 
-print(pygame.font.get_fonts())
-
 #메인루프
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        if event.type == pygame.MOUSEBUTTONUP:
+            manager.mouseUp()
+        if not listener is None:
+            if event.type == pygame.KEYDOWN:
+                if event.key in ALL_CHECKING_KEYS:
+                    continue
+                listener(event.key)
+                ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
     
     curPressedKey = pygame.key.get_pressed()
     for keyCode in ALL_CHECKING_KEYS:
