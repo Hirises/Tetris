@@ -54,8 +54,17 @@ cells = []
     
 #글로벌 변수
 manager = None
+
+#게임 변수
+score = 0
 curBlock = None
 pressedKey = []
+
+def randomBit():
+    if random.randint(0, 1) == 0:
+        return 1
+    else:
+        return -1
 
 def getRange(start, to, step):
     if step > 0:
@@ -70,38 +79,80 @@ def getRange(start, to, step):
             return range(to - 1, start - 1, step)
         else:
             return range(start, to, step)
+        
+def displayText(string, x, y, size = 40, font = "arial"):
+    font = pygame.font.SysFont(font, size)
+    text = font.render(string, True, (0, 0, 0))
+    rect = text.get_rect()
+    rect.center = (x, y)
+    screen.blit(text, rect)
 
 #블럭 객체 - 왼쪽 위가 (0, 0)
 class Block:
-    def __init__(self, originState, x = 0, y = 0, dirX = 1, dirY = 1, color = (255, 0, 0)):
+    def __init__(self, originState, x = 0, y = 0, 
+                 dirZ = 1, dirX = 1, dirY = 1, color = (255, 0, 0)):
         self.originState = originState
         self.x = x
         self.y = y
         self.dirX = dirX
         self.dirY = dirY
-        self.curState = self.getState(self.dirX, self.dirY)
+        self.dirZ = dirZ
+        self.curState = self.getState(self.dirZ, self.dirX, self.dirY)
         self.color = color
         
-    def getState(self, dirX, dirY):
+    def getState(self, dirZ, dirX, dirY):
         state = []
-        for x in getRange(0, len(self.originState), dirX):
-            tmp = []
-            for y in getRange(0, len(self.originState[0]), dirY):
-                tmp.append(self.originState[x][y])
-            state.append(tmp)
+        if dirZ == 1:
+            for x in getRange(0, len(self.originState), dirX):
+                tmp = []
+                for y in getRange(0, len(self.originState[0]), dirY):
+                    tmp.append(self.originState[x][y])
+                state.append(tmp)
+        else:
+            for x in getRange(0, len(self.originState[0]), dirX):
+                tmp = []=
+                for y in getRange(0, len(self.originState), dirY):
+                    tmp.append(self.originState[y][x])
+                state.append(tmp)
         return state
     
     def turnRight(self):
-        if self.isColideWith(self.getState(self.dirX * -1, self.dirY), self.x, self.y):
+        dirZ = self.dirZ
+        dirX = self.dirX
+        dirY = self.dirY
+        
+        dirZ *= -1
+        if dirX == dirY:
+            dirY *= -1
+        else:
+            dirX *= -1
+            
+        if self.isColideWith(self.getState(dirZ, dirX, dirY), self.x, self.y):
             return
         
-        self.dirX *= -1
+        self.curState = self.getState(dirZ, dirX, dirY)
+        self.dirZ = dirZ
+        self.dirX = dirX
+        self.dirY = dirY
         
     def turnLeft(self):
-        if self.isColideWith(self.getState(self.dirX, self.dirY * -1), self.x, self.y):
-            return
+        dirZ = self.dirZ
+        dirX = self.dirX
+        dirY = self.dirY
         
-        self.dirY *= -1
+        dirZ *= -1
+        if dirX == dirY:
+            dirX *= -1
+        else:
+            dirY *= -1
+            
+        if self.isColideWith(self.getState(dirZ, dirX, dirY), self.x, self.y):
+            return
+            
+        self.curState = self.getState(dirZ, dirX, dirY)
+        self.dirZ = dirZ
+        self.dirX = dirX
+        self.dirY = dirY
     
     def fall(self):
         if self.isColideWith(self.curState, self.x, self.y + 1):
@@ -126,6 +177,22 @@ class Block:
                 
         curBlock = None
         
+        for y in range(self.y, self.y + len(self.curState[0])):
+            self.lineCheck(y)
+            
+    def lineCheck(self, y):
+        global score
+        
+        for x in range(0, HORIZONTAL_CELL_COUNT):
+            if cells[x][y].state is CellState.Empty:
+                return
+        
+        for x in range(0, HORIZONTAL_CELL_COUNT):
+            cells[x][y].changeState(CellState.Empty, (255, 0, 0))
+        for y in range(y, 1, -1):
+            for x in range(0, HORIZONTAL_CELL_COUNT):
+                cells[x][y].changeState(cells[x][y - 1].state, cells[x][y - 1].color)
+        score += 100
         
     def isColideWith(self, state, locX, locY):
         if locX < 0 or locY < 0:
@@ -199,6 +266,9 @@ class GameManager:
         curBlock = Block(ALL_BLOCK_STATES[random.randint(0, len(ALL_BLOCK_STATES) - 1)],
                          color = ALL_BLOCK_COLORS[random.randint(0, len(ALL_BLOCK_COLORS) - 1)])
      
+    def drawUI(self):
+        displayText(str(score), 100, 50)
+        
     def drawScreen(self):
         pygame.draw.rect(screen, GAME_SCREEN_COLOR, 
                          (SCREEN_OFFSET[0], SCREEN_OFFSET[1], 
