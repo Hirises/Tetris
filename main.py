@@ -22,7 +22,7 @@ VERTICAL_CELL_COUNT = 20
 CELL_SIZE = 20
 CELL_OFFSET = 1
 EMPTY_CELL_COLOR = (0, 0, 0)
-SCREEN_COLOR = (255, 255, 255)
+SCREEN_COLOR = (40, 20, 80)
 GAME_SCREEN_COLOR = (150, 150, 150)
 SCREEN_OFFSET = (200, 0)
 TPS = 30
@@ -93,9 +93,18 @@ def getRange(start, to, step):
         else:
             return range(start, to, step)
         
-def displayText(string, x, y, size = 40, font = "arial"):
+def displayText(string, x, y, size = 40, font = "arial", color = (0, 0, 0)):
     font = pygame.font.SysFont(font, size)
-    text = font.render(string, True, (0, 0, 0))
+    text = font.render(string, True, color)
+    rect = text.get_rect()
+    rect.center = (x, y)
+    screen.blit(text, rect)
+
+def displayTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial", color = (0, 0, 0), backgroundColor = (255, 255, 255)):
+    pygame.draw.rect(screen, backgroundColor, 
+                     (x - dx / 2, y - dy / 2, dx, dy))
+    font = pygame.font.SysFont(font, size)
+    text = font.render(string, True, color)
     rect = text.get_rect()
     rect.center = (x, y)
     screen.blit(text, rect)
@@ -300,6 +309,9 @@ class GameManager:
             TICK_PER_CELL = DEFAULT_TICK_PER_CELL
     
     def keyPressed(self, keyCode):
+        if not appState is AppState.Run:
+            return
+        
         if keyCode == pygame.K_a:
             if not curBlock is None:
                 curBlock.move(-1, 0)
@@ -312,9 +324,10 @@ class GameManager:
         
         if keyCode == pygame.K_SPACE:
             TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
-            if gameState is GameState.Pause:
-                pass
-            
+        
+        if not appState is AppState.Run:
+            return
+        
         if keyCode == pygame.K_a:
             if not curBlock is None:
                 curBlock.move(-1, 0)
@@ -330,16 +343,14 @@ class GameManager:
                 curBlock.turnRight()
     
     def update(self):
-        if gameState is GameState.Pause:
-            return
-        
-        self.tick += 1
-        
-        if curBlock is None and gameState is GameState.WaitNewBlock:
-            self.spawnNewBlock()
-        
-        if self.tick % TICK_PER_CELL == 0:
-            curBlock.fall()
+        if appState is AppState.Run:
+            self.tick += 1
+            
+            if curBlock is None and gameState is GameState.WaitNewBlock:
+                self.spawnNewBlock()
+            
+            if self.tick % TICK_PER_CELL == 0:
+                curBlock.fall()
     
     def spawnNewBlock(self):
         global curBlock
@@ -351,44 +362,59 @@ class GameManager:
         gameState = GameState.Drop
      
     def drawUI(self):
-        if gameState is GameState.Pause:
-            pass
-        else:
+        if appState is AppState.Menu:
+            displayText("Tetris", SCREEN_WIDTH / 2, 100, size = 50, color = (255, 255, 255))
+            displayTextRect("New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50))
+            displayTextRect("Help", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50))
+            displayTextRect("Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50))
+        elif appState is AppState.Run:
             displayText(str(score), 500, 50)
         
     def drawScreen(self):
-        pygame.draw.rect(screen, GAME_SCREEN_COLOR, 
-                         (SCREEN_OFFSET[0], SCREEN_OFFSET[1], 
-                          CELL_SIZE * HORIZONTAL_CELL_COUNT, 
-                          CELL_SIZE * VERTICAL_CELL_COUNT))
-        
-        for y in range(0, VERTICAL_CELL_COUNT):
-            for x in range(0, HORIZONTAL_CELL_COUNT):
-                if cells[x][y].state is CellState.Empty:
-                    pygame.draw.rect(screen, EMPTY_CELL_COLOR, 
-                                     (CELL_SIZE * x + SCREEN_OFFSET[0], 
-                                      CELL_SIZE * y + SCREEN_OFFSET[1], 
-                                      CELL_SIZE - CELL_OFFSET, CELL_SIZE - CELL_OFFSET))
-                else:
-                    pygame.draw.rect(screen, cells[x][y].color, 
-                                     (CELL_SIZE * x + SCREEN_OFFSET[0],
-                                      CELL_SIZE * y + SCREEN_OFFSET[1], 
-                                      CELL_SIZE - CELL_OFFSET, CELL_SIZE - CELL_OFFSET))
-        if not curBlock is None:
-            state = curBlock.curState
-            for x in range(curBlock.x, curBlock.x + len(state)):
-                for y in range(curBlock.y, curBlock.y + len(state[0])):
-                    if y < 0:
-                        continue
-                    
-                    if state[x - curBlock.x][y - curBlock.y] is CellState.Occupied:
-                        pygame.draw.rect(screen, curBlock.color, 
+        if appState is AppState.Run:
+            pygame.draw.rect(screen, GAME_SCREEN_COLOR, 
+                             (SCREEN_OFFSET[0], SCREEN_OFFSET[1], 
+                              CELL_SIZE * HORIZONTAL_CELL_COUNT, 
+                              CELL_SIZE * VERTICAL_CELL_COUNT))
+            
+            for y in range(0, VERTICAL_CELL_COUNT):
+                for x in range(0, HORIZONTAL_CELL_COUNT):
+                    offsetX = CELL_OFFSET
+                    offsetY = CELL_OFFSET
+                    if x + 1 >= HORIZONTAL_CELL_COUNT:
+                        offsetX = 0
+                    if y + 1 >= VERTICAL_CELL_COUNT:
+                        offsetY = 0
+                            
+                    if cells[x][y].state is CellState.Empty:
+                        pygame.draw.rect(screen, EMPTY_CELL_COLOR, 
                                          (CELL_SIZE * x + SCREEN_OFFSET[0], 
                                           CELL_SIZE * y + SCREEN_OFFSET[1], 
-                                          CELL_SIZE - CELL_OFFSET, CELL_SIZE - CELL_OFFSET))
-        
-        if appState is AppState.Menu:
-            pass
+                                          CELL_SIZE - offsetX, CELL_SIZE - offsetY))
+                    else:
+                        pygame.draw.rect(screen, cells[x][y].color, 
+                                         (CELL_SIZE * x + SCREEN_OFFSET[0],
+                                          CELL_SIZE * y + SCREEN_OFFSET[1], 
+                                          CELL_SIZE - offsetX, CELL_SIZE - offsetY))
+            if not curBlock is None:
+                state = curBlock.curState
+                for x in range(curBlock.x, curBlock.x + len(state)):
+                    for y in range(curBlock.y, curBlock.y + len(state[0])):
+                        if y < 0:
+                            continue
+                        
+                        offsetX = CELL_OFFSET
+                        offsetY = CELL_OFFSET
+                        if x - 1 == HORIZONTAL_CELL_COUNT:
+                            offsetX = 0
+                        if y - 1 == VERTICAL_CELL_COUNT:
+                            offsetY = 0
+                        
+                        if state[x - curBlock.x][y - curBlock.y] is CellState.Occupied:
+                            pygame.draw.rect(screen, curBlock.color, 
+                                             (CELL_SIZE * x + SCREEN_OFFSET[0], 
+                                              CELL_SIZE * y + SCREEN_OFFSET[1], 
+                                              CELL_SIZE - offsetX, CELL_SIZE - offsetY))
      
 #초기화
 manager = GameManager()
@@ -398,6 +424,8 @@ for x in range(0, HORIZONTAL_CELL_COUNT):
     for y in range(0, VERTICAL_CELL_COUNT):
         tmp.append(Cell())
     cells.append(tmp)
+
+print(pygame.font.get_fonts())
 
 #메인루프
 while True:
