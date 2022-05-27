@@ -13,9 +13,9 @@ SCREEN_COLOR = (255, 255, 255)
 GAME_SCREEN_COLOR = (150, 150, 150)
 SCREEN_OFFSET = (200, 0)
 TPS = 30
-DEFAULT_TICK_PER_CELL = 30
-ACCELERATED_TICK_PRE_CELL = 30
-TICK_PER_CELL = 30
+DEFAULT_TICK_PER_CELL = 10
+ACCELERATED_TICK_PRE_CELL = 3
+TICK_PER_CELL = 10
 
 class CellState(Enum):
     Empty = 0
@@ -141,7 +141,7 @@ class GameManager:
         if curBlock is None:
             self.spawnNewBlock()
         
-        if self.tick // TICK_PER_CELL == 0:
+        if self.tick % TICK_PER_CELL == 0:
             curBlock.move(0, 1)
     
     def spawnNewBlock(self):
