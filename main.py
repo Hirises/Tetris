@@ -606,22 +606,22 @@ class GameManager:
                     #세팅 - Quit
                     menuState = MenuState.Main
             elif menuState is MenuState.KeySetting:
-                if isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 130, 80, 30):
+                if isCollideIn(pos, SCREEN_WIDTH / 2 - 70, 130, 100, 30):
                     #키 세팅 - Left Move
                     listener = lambda keyCode : setLeftMoveKey(keyCode)
-                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 180, 80, 30):
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 70, 180, 100, 30):
                     #키 세팅 - Right Move
                     listener = lambda keyCode : setRightMoveKey(keyCode)
-                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 230, 80, 30):
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 70, 230, 100, 30):
                     #키 세팅 - Left Turn
                     listener = lambda keyCode : setLeftTurnKey(keyCode)
-                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 50, 280, 80, 30):
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 - 70, 280, 100, 30):
                     #키 세팅 - Right Turn
                     listener = lambda keyCode : setRightTurnKey(keyCode)
-                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 250, 130, 80, 30):
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 230, 130, 100, 30):
                     #키 세팅 - Fast Drop
                     listener = lambda keyCode : setDropFastKey(keyCode)
-                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 250, 180, 80, 30):
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 230, 180, 100, 30):
                     #키 세팅 - Pause Game
                     listener = lambda keyCode : setPauseKey(keyCode)
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
@@ -677,22 +677,22 @@ class GameManager:
 
 
                 displayText("Move Left", SCREEN_WIDTH / 2 - 200, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_LEFT).upper(), SCREEN_WIDTH / 2 - 50, 130, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_LEFT).upper(), SCREEN_WIDTH / 2 - 70, 130, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
                 displayText("Move Right", SCREEN_WIDTH / 2 - 200, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_RIGHT).upper(), SCREEN_WIDTH / 2 - 50, 180, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_RIGHT).upper(), SCREEN_WIDTH / 2 - 70, 180, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
                 displayText("Turn Left", SCREEN_WIDTH / 2 - 200, 230, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_LEFT).upper(), SCREEN_WIDTH / 2 - 50, 230, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_LEFT).upper(), SCREEN_WIDTH / 2 - 70, 230, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
                 displayText("Turn Right", SCREEN_WIDTH / 2 - 200, 280, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_RIGHT).upper(), SCREEN_WIDTH / 2 - 50, 280, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_RIGHT).upper(), SCREEN_WIDTH / 2 - 70, 280, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
                 displayText("Drop Fast", SCREEN_WIDTH / 2 + 100, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_FAST_DROP).upper(), SCREEN_WIDTH / 2 + 250, 130, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_FAST_DROP).upper(), SCREEN_WIDTH / 2 + 230, 130, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
                 displayText("Pause Game", SCREEN_WIDTH / 2 + 100, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_PAUSE).upper(), SCREEN_WIDTH / 2 + 250, 180, 80, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, pygame.key.name(KEY_PAUSE).upper(), SCREEN_WIDTH / 2 + 230, 180, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
