@@ -19,6 +19,7 @@ class MenuState(Enum):
     Help = 2
     KeySetting = 3
     NewWorkSetting = 4
+    GameMode = 5
 class CellState(Enum):
     Empty = 0
     Occupied = 1
@@ -583,8 +584,7 @@ class GameManager:
             if menuState is MenuState.Main:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40):
                     #메인 메뉴 - New Game
-                    self.gameReset()
-                    self.gameStart()
+                    menuState = MenuState.GameMode
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40):
                     #메인 메뉴 - Settings
                     menuState = MenuState.Setting
@@ -592,6 +592,14 @@ class GameManager:
                     #메인 메뉴 - Quit
                     pygame.quit()
                     sys.exit()
+            elif menuState is MenuState.GameMode:
+                if isCollideIn(pos, SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140):
+                    self.gameReset()
+                    self.gameStart()
+                elif isCollideIn(pos, SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140):
+                    pass
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    menuState = MenuState.Main
             elif menuState is MenuState.Setting:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, 170, 200, 40):
                     #세팅 - Key Setting
@@ -670,6 +678,11 @@ class GameManager:
 
                 displayInterectibleTextRect(pos, "New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.GameMode:
+                displayInterectibleTextRect(pos, "Sole", SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140, size = 80, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Duel", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140, size = 80, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.KeySetting:
                 #키 설정
