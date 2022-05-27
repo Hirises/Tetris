@@ -24,7 +24,7 @@ class CellState(Enum):
 class AnimationType(Enum):
     LineClear = 1
 class AnimationState:
-    def __init__(self, type, var = 0):
+    def __init__(self, type, var):
         global gameState
         global preAnimaionState
 
@@ -38,20 +38,23 @@ class AnimationState:
 
     def update(self):
         self.tick += 1
-
         if self.type == AnimationType.LineClear:
             if self.tick == 1:
                 for x in range(0, HORIZONTAL_CELL_COUNT):
-                    cells[x][self.var].changeState(CellState.Occupied, (255, 255, 255))
+                    for y in self.var:
+                        cells[x][y].changeState(CellState.Occupied, (255, 255, 255))
             elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
                 for x in range(0, HORIZONTAL_CELL_COUNT):
-                    cells[x][self.var].changeState(CellState.Empty, (255, 0, 0))
-                for y in range(self.var, 1, -1):
-                    for x in range(0, HORIZONTAL_CELL_COUNT):
-                        cells[x][y].changeState(cells[x][y - 1].state, cells[x][y - 1].color)
+                    for y in self.var:
+                        cells[x][y].changeState(CellState.Empty, (255, 0, 0))
+                for locY in sorted(self.var):
+                    for y in range(locY, 1, -1):
+                        for x in range(0, HORIZONTAL_CELL_COUNT):
+                            cells[x][y].changeState(cells[x][y - 1].state, cells[x][y - 1].color)
                 animations.remove(self)
             elif self.tick >= 3:
-                cells[self.tick - 3][self.var].changeState(CellState.Empty, (255, 255, 255))
+                for y in self.var:
+                    cells[self.tick - 3][y].changeState(CellState.Empty, (255, 255, 255))
 
 SCREEN_WIDTH = 600
 SCREEN_HEIGTH = 400
@@ -114,6 +117,7 @@ gameState = GameState.WaitNewBlock
 appState = AppState.Menu
 menuState = MenuState.Main
 score = 0
+highScore = 0
 curBlock = None
 pressedKey = {}
 lastX = 0
@@ -308,6 +312,7 @@ class Block:
         global curBlock
         global gameState
         global lastX
+        global score
         
         for x in range(0, len(self.curState)):
             for y in range(0, len(self.curState[0])):
@@ -326,19 +331,21 @@ class Block:
         gameState = GameState.WaitNewBlock
         curBlock = None
 
-        for y in range(self.y, self.y + len(self.curState[0])):
-            self.lineCheck(y)
+        lines = []
+        for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
+            if self.lineCheck(y):
+                lines.append(y)
+                score += 100
+        
+        if len(lines) > 0:
+            animations.append(AnimationState(AnimationType.LineClear, lines))
             
     def lineCheck(self, y):
-        global score
-        
         for x in range(0, HORIZONTAL_CELL_COUNT):
             if cells[x][y].state is CellState.Empty:
-                return
-        score += 100
-        
-        print("ani")
-        animations.append(AnimationState(AnimationType.LineClear, y))
+                return False
+
+        return True
         
     def isColideWith(self, state, locX, locY):
         if locX < 0:
@@ -404,8 +411,11 @@ class GameManager:
     
     def gameEnd(self):
         global gameState
+        global highScore
         
         gameState = GameState.GameOver
+        if score > highScore:
+            highScore = score
     
     def keyUp(self, keyCode):
         global TICK_PER_CELL
@@ -543,9 +553,11 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40):
                     gameState = prePauseState
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40):
+                    self.gameEnd()
                     self.gameReset()
                     self.gameStart()
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40):
+                    self.gameEnd()
                     menuState = MenuState.Main
                     appState = AppState.Menu
      
@@ -554,6 +566,7 @@ class GameManager:
         if appState is AppState.Menu:
             if menuState is MenuState.Main:
                 displayText("Tetris", SCREEN_WIDTH / 2, 100, size = 60, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("highScore " + str(highScore), SCREEN_WIDTH / 2, 150, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
