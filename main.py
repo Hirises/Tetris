@@ -101,6 +101,7 @@ ALL_BLOCK_STATES = [
      [CellState.Empty, CellState.Occupied]]
     ]
 ALL_BLOCK_COLORS = [(0, 255, 0), (0, 0, 255), (255, 0, 0), (255, 255, 0), (255, 0, 255)]
+FAKE_BLOCK_COLOR = (255, 255, 255)
 
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGTH))
@@ -119,6 +120,7 @@ menuState = MenuState.Main
 score = 0
 highScore = 0
 curBlock = None
+fakeBlock = None
 pressedKey = {}
 lastX = 0
 prePauseState = GameState.WaitNewBlock
@@ -216,6 +218,8 @@ def setPauseKey(keyCode):
 class Block:
     def __init__(self, originState, x = 0, 
                  dirZ = 1, dirX = 1, dirY = 1, color = (255, 0, 0)):
+        global fakeBlock
+
         self.originState = originState
         self.x = x
         self.y = 0
@@ -232,6 +236,9 @@ class Block:
             
         if self.isColideWith(self.curState, self.x, self.y):
             manager.gameEnd()
+            return
+
+        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     def getState(self, dirZ, dirX, dirY):
         state = []
@@ -250,6 +257,8 @@ class Block:
         return state
     
     def turnRight(self):
+        global fakeBlock
+
         dirZ = self.dirZ
         dirX = self.dirX
         dirY = self.dirY
@@ -271,8 +280,11 @@ class Block:
         self.dirX = dirX
         self.dirY = dirY
         self.y = y
+        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     def turnLeft(self):
+        global fakeBlock
+
         dirZ = self.dirZ
         dirX = self.dirX
         dirY = self.dirY
@@ -294,6 +306,7 @@ class Block:
         self.dirX = dirX
         self.dirY = dirY
         self.y = y
+        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
     
     def fall(self):
         if self.isColideWith(self.curState, self.x, self.y + 1):
@@ -302,17 +315,21 @@ class Block:
         self.y += 1
     
     def move(self, dx, dy):
+        global fakeBlock
+
         if self.isColideWith(self.curState, self.x + dx, self.y + dy):
             return
         
         self.x += dx
         self.y += dy
+        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     def landing(self):
         global curBlock
         global gameState
         global lastX
         global score
+        global fakeBlock
         
         for x in range(0, len(self.curState)):
             for y in range(0, len(self.curState[0])):
@@ -330,6 +347,7 @@ class Block:
         lastX = self.x
         gameState = GameState.WaitNewBlock
         curBlock = None
+        fakeBlock = None
 
         lines = []
         for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
@@ -364,6 +382,31 @@ class Block:
                 
                 if (state[x][y] is CellState.Occupied 
                     and cells[x + locX][y + locY].state is CellState.Occupied):
+                    return True
+        return False
+
+class FakeBlock:
+    def __init__(self, state, x, y, color):
+        self.state = state
+        self.x = x
+        self.y = y
+        self.color = color
+
+        while not self.isColideWith(self.y + 1):
+            self.y += 1
+
+    def isColideWith(self, locY):
+        for x in range(0, len(self.state)):
+            for y in range(0, len(self.state[0])):
+                if self.x + x >= HORIZONTAL_CELL_COUNT:
+                    return True
+                if locY + y >= VERTICAL_CELL_COUNT:
+                    return True
+                if locY + y < 0:
+                    continue
+                
+                if (self.state[x][y] is CellState.Occupied 
+                    and cells[x + self.x][y + locY].state is CellState.Occupied):
                     return True
         return False
 
@@ -642,6 +685,26 @@ class GameManager:
                                          (CELL_SIZE * x + SCREEN_OFFSET[0],
                                           CELL_SIZE * y + SCREEN_OFFSET[1], 
                                           CELL_SIZE - offsetX, CELL_SIZE - offsetY))
+            if not fakeBlock is None:
+                state = fakeBlock.state
+                for x in range(fakeBlock.x, fakeBlock.x + len(state)):
+                    for y in range(fakeBlock.y, fakeBlock.y + len(state[0])):
+                        if y < 0:
+                            continue
+                        
+                        offsetX = CELL_OFFSET
+                        offsetY = CELL_OFFSET
+                        if x - 1 == HORIZONTAL_CELL_COUNT:
+                            offsetX = 0
+                        if y - 1 == VERTICAL_CELL_COUNT:
+                            offsetY = 0
+                        
+                        if state[x - fakeBlock.x][y - fakeBlock.y] is CellState.Occupied:
+                            pygame.draw.rect(screen, FAKE_BLOCK_COLOR, 
+                                             (CELL_SIZE * x + SCREEN_OFFSET[0], 
+                                              CELL_SIZE * y + SCREEN_OFFSET[1], 
+                                              CELL_SIZE - offsetX, CELL_SIZE - offsetY))
+            
             if not curBlock is None:
                 state = curBlock.curState
                 for x in range(curBlock.x, curBlock.x + len(state)):
