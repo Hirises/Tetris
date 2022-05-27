@@ -6,6 +6,11 @@ from enum import Enum
 class CellState(Enum):
     Empty = 0
     Occupied = 1
+class GameState(Enum):
+    Stop = 0
+    Drop = 1
+    WaitNewBlock = 2
+    Animating = 3
 
 SCREEN_WIDTH = 600
 SCREEN_HEIGTH = 400
@@ -19,8 +24,10 @@ GAME_SCREEN_COLOR = (150, 150, 150)
 SCREEN_OFFSET = (200, 0)
 TPS = 30
 DEFAULT_TICK_PER_CELL = 10
-ACCELERATED_TICK_PRE_CELL = 3
-TICK_PER_CELL = 10
+ACCELERATED_TICK_PRE_CELL = 2
+TICK_PER_CELL = DEFAULT_TICK_PER_CELL
+KEY_INPUT_DELAY = 7
+KEY_INPUT_REPEAT = 3
 ALL_CHECKING_KEYS = [pygame.K_a, pygame.K_d, pygame.K_w, pygame.K_s, pygame.K_SPACE]
 ALL_BLOCK_STATES = [
     [[CellState.Occupied, CellState.Occupied],
@@ -56,9 +63,11 @@ cells = []
 manager = None
 
 #게임 변수
+gameState = GameState.WaitNewBlock
 score = 0
 curBlock = None
-pressedKey = []
+pressedKey = {}
+lastX = 0
 
 def randomBit():
     if random.randint(0, 1) == 0:
@@ -100,6 +109,10 @@ class Block:
         self.curState = self.getState(self.dirZ, self.dirX, self.dirY)
         self.color = color
         
+        self.y -= len(self.curState[0]) + 1
+        if self.x + len(self.curState) - 1 >= HORIZONTAL_CELL_COUNT:
+            self.x -= self.x + len(self.curState) - HORIZONTAL_CELL_COUNT - 1
+        
     def getState(self, dirZ, dirX, dirY):
         state = []
         if dirZ == 1:
@@ -110,7 +123,7 @@ class Block:
                 state.append(tmp)
         else:
             for x in getRange(0, len(self.originState[0]), dirX):
-                tmp = []=
+                tmp = []
                 for y in getRange(0, len(self.originState), dirY):
                     tmp.append(self.originState[y][x])
                 state.append(tmp)
@@ -120,39 +133,47 @@ class Block:
         dirZ = self.dirZ
         dirX = self.dirX
         dirY = self.dirY
+        y = self.y
         
         dirZ *= -1
         if dirX == dirY:
             dirY *= -1
         else:
             dirX *= -1
+        state = self.getState(dirZ, dirX, dirY)
+        y -=  len(state[0]) - len(self.curState[0])
             
-        if self.isColideWith(self.getState(dirZ, dirX, dirY), self.x, self.y):
+        if self.isColideWith(state, self.x, y):
             return
         
         self.curState = self.getState(dirZ, dirX, dirY)
         self.dirZ = dirZ
         self.dirX = dirX
         self.dirY = dirY
+        self.y = y
         
     def turnLeft(self):
         dirZ = self.dirZ
         dirX = self.dirX
         dirY = self.dirY
+        y = self.y
         
         dirZ *= -1
         if dirX == dirY:
             dirX *= -1
         else:
             dirY *= -1
+        state = self.getState(dirZ, dirX, dirY)
+        y -=  len(state[0]) - len(self.curState[0])
             
-        if self.isColideWith(self.getState(dirZ, dirX, dirY), self.x, self.y):
+        if self.isColideWith(state, self.x, self.y):
             return
             
         self.curState = self.getState(dirZ, dirX, dirY)
         self.dirZ = dirZ
         self.dirX = dirX
         self.dirY = dirY
+        self.y = y
     
     def fall(self):
         if self.isColideWith(self.curState, self.x, self.y + 1):
@@ -169,16 +190,27 @@ class Block:
         
     def landing(self):
         global curBlock
+        global gameState
+        global lastX
         
         for x in range(0, len(self.curState)):
             for y in range(0, len(self.curState[0])):
+                if y + self.y < 0:
+                    continue
+                
                 if self.curState[x][y] is CellState.Occupied:
                     cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
-                
-        curBlock = None
+        
+        if self.y - len(self.curState[0]) + 1 < 0:
+            manager.gameEnd()
+            return
         
         for y in range(self.y, self.y + len(self.curState[0])):
             self.lineCheck(y)
+            
+        lastX = self.x
+        gameState = GameState.WaitNewBlock
+        curBlock = None
             
     def lineCheck(self, y):
         global score
@@ -225,11 +257,40 @@ class GameManager:
     def __init__(self):
         self.tick = 0
     
+    def resetGame(self):
+        global score
+        global cells
+        global curBlock
+        
+        curBlock = None
+        score = 0
+        for x in range(0, HORIZONTAL_CELL_COUNT):
+            tmp = []
+            for y in range(0, VERTICAL_CELL_COUNT):
+                tmp.append(Cell())
+            cells.append(tmp)
+    
+    def gameEnd(self):
+        global gameState
+        
+        gameState = GameState.Stop
+    
     def keyUp(self, keyCode):
         global TICK_PER_CELL
         
         if keyCode == pygame.K_SPACE:
             TICK_PER_CELL = DEFAULT_TICK_PER_CELL
+    
+    def keyPressed(self, keyCode):
+        if not gameState is GameState.Drop:
+            return
+        
+        if keyCode == pygame.K_a:
+            if not curBlock is None:
+                curBlock.move(-1, 0)
+        if keyCode == pygame.K_d:
+            if not curBlock is None:
+                curBlock.move(1, 0)
     
     def keyDown(self, keyCode):
         global TICK_PER_CELL
@@ -237,13 +298,16 @@ class GameManager:
         if keyCode == pygame.K_SPACE:
             TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
             
+        if not gameState is GameState.Drop:
+            return
+            
         if keyCode == pygame.K_a:
             if not curBlock is None:
                 curBlock.move(-1, 0)
         if keyCode == pygame.K_d:
             if not curBlock is None:
                 curBlock.move(1, 0)
-                
+            
         if keyCode == pygame.K_w:
             if not curBlock is None:
                 curBlock.turnLeft()
@@ -254,7 +318,7 @@ class GameManager:
     def update(self):
         self.tick += 1
         
-        if curBlock is None:
+        if curBlock is None and gameState is GameState.WaitNewBlock:
             self.spawnNewBlock()
         
         if self.tick % TICK_PER_CELL == 0:
@@ -262,12 +326,15 @@ class GameManager:
     
     def spawnNewBlock(self):
         global curBlock
+        global gameState
         
         curBlock = Block(ALL_BLOCK_STATES[random.randint(0, len(ALL_BLOCK_STATES) - 1)],
-                         color = ALL_BLOCK_COLORS[random.randint(0, len(ALL_BLOCK_COLORS) - 1)])
+                         color = ALL_BLOCK_COLORS[random.randint(0, len(ALL_BLOCK_COLORS) - 1)],
+                         dirZ = randomBit(), dirX = randomBit(), dirY = randomBit(), x = lastX)
+        gameState = GameState.Drop
      
     def drawUI(self):
-        displayText(str(score), 100, 50)
+        displayText(str(score), 500, 50)
         
     def drawScreen(self):
         pygame.draw.rect(screen, GAME_SCREEN_COLOR, 
@@ -291,6 +358,9 @@ class GameManager:
             state = curBlock.curState
             for x in range(curBlock.x, curBlock.x + len(state)):
                 for y in range(curBlock.y, curBlock.y + len(state[0])):
+                    if y < 0:
+                        continue
+                    
                     if state[x - curBlock.x][y - curBlock.y] is CellState.Occupied:
                         pygame.draw.rect(screen, curBlock.color, 
                                          (CELL_SIZE * x + SCREEN_OFFSET[0], 
@@ -313,19 +383,25 @@ while True:
             pygame.quit()
             sys.exit()
     
-    curPressedKey = pygame.key.get_pressed();
+    curPressedKey = pygame.key.get_pressed()
     for keyCode in ALL_CHECKING_KEYS:
         if not curPressedKey[keyCode] and keyCode in pressedKey:
             manager.keyUp(keyCode)
-            pressedKey.remove(keyCode)
-        if curPressedKey[keyCode] and not keyCode in pressedKey:
-            manager.keyDown(keyCode)
-            pressedKey.append(keyCode)
+            pressedKey.pop(keyCode)
+        if curPressedKey[keyCode]:
+            if not keyCode in pressedKey:
+                manager.keyDown(keyCode)
+                pressedKey[keyCode] = manager.tick
+            elif (pressedKey[keyCode] >= KEY_INPUT_DELAY 
+                  and manager.tick - pressedKey[keyCode] >= KEY_INPUT_DELAY
+                  and (manager.tick - pressedKey[keyCode] - KEY_INPUT_DELAY) % KEY_INPUT_REPEAT == 0):
+                manager.keyPressed(keyCode)
     
     manager.update()
     
     screen.fill(SCREEN_COLOR)
     manager.drawScreen()
+    manager.drawUI()
     
     pygame.display.update()
     clock.tick(TPS)
