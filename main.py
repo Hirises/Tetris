@@ -6,8 +6,11 @@ from enum import Enum
 class CellState(Enum):
     Empty = 0
     Occupied = 1
+class AppState(Enum):
+    Menu = 0
+    Run = 1
 class GameState(Enum):
-    Stop = 0
+    Pause = 0
     Drop = 1
     WaitNewBlock = 2
     Animating = 3
@@ -64,6 +67,7 @@ manager = None
 
 #게임 변수
 gameState = GameState.WaitNewBlock
+appState = AppState.Menu
 score = 0
 curBlock = None
 pressedKey = {}
@@ -98,20 +102,23 @@ def displayText(string, x, y, size = 40, font = "arial"):
 
 #블럭 객체 - 왼쪽 위가 (0, 0)
 class Block:
-    def __init__(self, originState, x = 0, y = 0, 
+    def __init__(self, originState, x = 0, 
                  dirZ = 1, dirX = 1, dirY = 1, color = (255, 0, 0)):
         self.originState = originState
         self.x = x
-        self.y = y
+        self.y = 0
         self.dirX = dirX
         self.dirY = dirY
         self.dirZ = dirZ
         self.curState = self.getState(self.dirZ, self.dirX, self.dirY)
         self.color = color
-        
-        self.y -= len(self.curState[0]) + 1
+    
+        self.y -= len(self.curState[0]) - 1
         if self.x + len(self.curState) - 1 >= HORIZONTAL_CELL_COUNT:
             self.x -= self.x + len(self.curState) - HORIZONTAL_CELL_COUNT - 1
+            
+        if self.isColideWith(self.curState, self.x, self.y):
+            manager.gameEnd()
         
     def getState(self, dirZ, dirX, dirY):
         state = []
@@ -227,7 +234,7 @@ class Block:
         score += 100
         
     def isColideWith(self, state, locX, locY):
-        if locX < 0 or locY < 0:
+        if locX < 0:
             return True
         
         for x in range(0, len(state)):
@@ -236,6 +243,8 @@ class Block:
                     return True
                 if locY + y >= VERTICAL_CELL_COUNT:
                     return True
+                if locY + y < 0:
+                    continue
                 
                 if (state[x][y] is CellState.Occupied 
                     and cells[x + locX][y + locY].state is CellState.Occupied):
@@ -257,11 +266,20 @@ class GameManager:
     def __init__(self):
         self.tick = 0
     
-    def resetGame(self):
+    def gameStart(self):
+        global gameState
+        
+        self.gameReset()
+        gameState.WaitNewBlock
+    
+    def gameReset(self):
         global score
         global cells
         global curBlock
+        global gameState
         
+        gameState.WaitNewBlock
+        self.tick = 0
         curBlock = None
         score = 0
         for x in range(0, HORIZONTAL_CELL_COUNT):
@@ -273,7 +291,7 @@ class GameManager:
     def gameEnd(self):
         global gameState
         
-        gameState = GameState.Stop
+        gameState = GameState.Pause
     
     def keyUp(self, keyCode):
         global TICK_PER_CELL
@@ -282,9 +300,6 @@ class GameManager:
             TICK_PER_CELL = DEFAULT_TICK_PER_CELL
     
     def keyPressed(self, keyCode):
-        if not gameState is GameState.Drop:
-            return
-        
         if keyCode == pygame.K_a:
             if not curBlock is None:
                 curBlock.move(-1, 0)
@@ -297,9 +312,8 @@ class GameManager:
         
         if keyCode == pygame.K_SPACE:
             TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
-            
-        if not gameState is GameState.Drop:
-            return
+            if gameState is GameState.Pause:
+                pass
             
         if keyCode == pygame.K_a:
             if not curBlock is None:
@@ -316,6 +330,9 @@ class GameManager:
                 curBlock.turnRight()
     
     def update(self):
+        if gameState is GameState.Pause:
+            return
+        
         self.tick += 1
         
         if curBlock is None and gameState is GameState.WaitNewBlock:
@@ -334,7 +351,10 @@ class GameManager:
         gameState = GameState.Drop
      
     def drawUI(self):
-        displayText(str(score), 500, 50)
+        if gameState is GameState.Pause:
+            pass
+        else:
+            displayText(str(score), 500, 50)
         
     def drawScreen(self):
         pygame.draw.rect(screen, GAME_SCREEN_COLOR, 
@@ -366,6 +386,9 @@ class GameManager:
                                          (CELL_SIZE * x + SCREEN_OFFSET[0], 
                                           CELL_SIZE * y + SCREEN_OFFSET[1], 
                                           CELL_SIZE - CELL_OFFSET, CELL_SIZE - CELL_OFFSET))
+        
+        if appState is AppState.Menu:
+            pass
      
 #초기화
 manager = GameManager()
