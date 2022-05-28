@@ -1,7 +1,10 @@
+import re
 import pygame
 import sys
 import random
 from enum import Enum
+
+import socket
 
 #State Enum 정의
 class AppState(Enum):
@@ -78,6 +81,7 @@ DEFAULT_TICK_PER_CELL = 10
 ACCELERATED_TICK_PRE_CELL = 2
 TICK_PER_CELL = DEFAULT_TICK_PER_CELL
 SCORE_PER_LINE = 100
+COMBO_SCORE = 50
 ALL_BLOCK_STATES = [
     [[CellState.Occupied, CellState.Occupied],
      [CellState.Occupied, CellState.Occupied]],
@@ -125,6 +129,7 @@ pressedKey = {}
 highScore = 0
 manager = None
 listener = None
+port = 15500
 
 #인게임 변수
 gameState = GameState.WaitNewBlock
@@ -132,6 +137,7 @@ prePauseState = GameState.WaitNewBlock
 preAnimaionState = GameState.WaitNewBlock
 cells = []
 score = 0
+combo = 0
 curBlock = None
 fakeBlock = None
 lastX = 0
@@ -188,6 +194,47 @@ def displayInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain 
     else:
         displayTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
 
+class TextField:
+    def __init__(self, x, y, dx, dy, content = "", placeHolder = "", color = (0, 0, 0), backgroundColor = (255, 255, 255), size = 40, font = "arial"):
+        self.x = x
+        self.y = y
+        self.dx = dx
+        self.dy = dy
+        self.content = content
+        self.placeHolder = placeHolder
+        self.color = color
+        self.backgroundColor = backgroundColor
+        self.size = size
+        self.font = font
+        self.focused = False
+    
+    def draw(self):
+        if self.focused:
+            displayTextRect(self.content + "|", x, y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+        else:
+            if self.content == "":
+                displayTextRect(self.placeHolder, x, y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+            else:
+                displayTextRect(self.content, x, y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+
+    def mouseDown(self, pos):
+        if isCollideIn(pos, self.x, self.y, self.dx, self.dy):
+            self.focused = True
+        else:
+            self.focused = False
+
+    def keyDown(self, keyCode):
+        if not self.focused:
+            return
+
+        if keyCode == pygame.K_ENTER:
+            self.focused = False
+        elif keyCode == pygame.K_BACKSPACE:
+            if len(self.content) > 0:
+                self.content = self.content[-1:]
+        elif re.match("[0-9]|[a-z]|[A-Z]|\[[0-9]\]", pygame.key.name(keyCode)):
+            self.content = self.content + str(pygame.key.name(keyCode))
+
 #마우스 위치 검출
 def isCollideIn(pos, x, y, dx, dy):
     posX = pos[0]
@@ -230,6 +277,13 @@ def setPauseKey(keyCode):
     global listener
     listener = None
     KEY_PAUSE = keyCode
+
+def getMyIp():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80))
+    ip = s.getsockname()[0]
+    s.close()
+    return ip
 
 #블럭 객체
 class Block:
@@ -350,6 +404,7 @@ class Block:
         global lastX
         global score
         global fakeBlock
+        global combo
         
         #블럭 배치
         for x in range(0, len(self.curState)):
@@ -377,9 +432,12 @@ class Block:
         for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
             if self.lineCheck(y):
                 lines.append(y)
-                score += SCORE_PER_LINE
+                score += SCORE_PER_LINE + COMBO_SCORE * combo
+                combo += 1
         if len(lines) > 0:
             animations.append(Animation(AnimationType.LineClear, lines))
+        else:
+            combo = 0
             
     #라인 클리어 감지
     def lineCheck(self, y):
@@ -467,12 +525,14 @@ class GameManager:
         global curBlock
         global gameState
         global lastX
+        global combo
         
         lastX = 0
         gameState = gameState.WaitNewBlock
         self.tick = 0
         curBlock = None
         score = 0
+        combo = 0
         cells.clear()
         for x in range(0, HORIZONTAL_CELL_COUNT):
             tmp = []
@@ -720,6 +780,10 @@ class GameManager:
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.NewWorkSetting:
                 #네트워크 설정
+                displayText("Network Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+
+                displayText("Port", SCREEN_WIDTH / 2, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
                 #도움말
