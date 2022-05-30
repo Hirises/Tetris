@@ -129,7 +129,7 @@ pressedKey = {}
 highScore = 0
 manager = None
 listener = None
-port = 15500
+displayObjects = []
 
 #인게임 변수
 gameState = GameState.WaitNewBlock
@@ -195,7 +195,8 @@ def displayInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain 
         displayTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
 
 class TextField:
-    def __init__(self, x, y, dx, dy, content = "", placeHolder = "", color = (0, 0, 0), backgroundColor = (255, 255, 255), size = 40, font = "arial"):
+    def __init__(self, x, y, dx, dy, menuType, content = "", placeHolder = "", color = (0, 0, 0), backgroundColor = (255, 255, 255), size = 40, font = "arial", maxLength = 5,
+    maxValue = 999, minValue = 0, useMinMax = False):
         self.x = x
         self.y = y
         self.dx = dx
@@ -207,33 +208,52 @@ class TextField:
         self.size = size
         self.font = font
         self.focused = False
+        self.menuType = menuType
+        self.maxLength = maxLength
+        self.maxValue = maxValue
+        self.minValue = minValue
+        self.useMinMax = useMinMax
     
     def draw(self):
-        if self.focused:
-            displayTextRect(self.content + "|", x, y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
-        else:
-            if self.content == "":
-                displayTextRect(self.placeHolder, x, y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+        if menuState is self.menuType:
+            if self.focused:
+                displayTextRect(self.content + "|", self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
             else:
-                displayTextRect(self.content, x, y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+                if self.content == "":
+                    displayTextRect(self.placeHolder, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+                else:
+                    displayTextRect(self.content, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
 
     def mouseDown(self, pos):
-        if isCollideIn(pos, self.x, self.y, self.dx, self.dy):
-            self.focused = True
-        else:
-            self.focused = False
+        if menuState is self.menuType:
+            if self.focused == False and isCollideIn(pos, self.x, self.y, self.dx, self.dy):
+                self.focused = True
+            elif self.focused == True:
+                self.focused = False
+                if self.useMinMax:
+                    if int(self.content) > self.maxValue:
+                        self.content = str(self.maxValue)
+                    elif int(self.content) < self.minValue:
+                        self.content = str(self.minValue)
 
     def keyDown(self, keyCode):
-        if not self.focused:
-            return
+        if menuState is self.menuType:
+            if not self.focused:
+                return
 
-        if keyCode == pygame.K_ENTER:
-            self.focused = False
-        elif keyCode == pygame.K_BACKSPACE:
-            if len(self.content) > 0:
-                self.content = self.content[-1:]
-        elif re.match("[0-9]|[a-z]|[A-Z]|\[[0-9]\]", pygame.key.name(keyCode)):
-            self.content = self.content + str(pygame.key.name(keyCode))
+            if keyCode == pygame.K_KP_ENTER or keyCode == pygame.K_RETURN:
+                self.focused = False
+            elif keyCode == pygame.K_BACKSPACE:
+                if len(self.content) > 0:
+                    self.content = self.content[:len(self.content) - 1]
+            elif re.match("[0-9]|\[[0-9]\]", pygame.key.name(keyCode)) and len(self.content) < self.maxLength:
+                self.content = self.content + str(pygame.key.name(keyCode))
+
+    def getContent(self):
+        if self.content == "":
+            return self.placeHolder
+        else:
+            return self.content
 
 #마우스 위치 검출
 def isCollideIn(pos, x, y, dx, dy):
@@ -782,7 +802,7 @@ class GameManager:
                 #네트워크 설정
                 displayText("Network Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
 
-                displayText("Port", SCREEN_WIDTH / 2, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
@@ -890,6 +910,8 @@ class GameManager:
      
 #초기화
 manager = GameManager()
+displayObjects.append(TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, menuState.NewWorkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content="14500",
+useMinMax= True, minValue=10000, maxValue=65535))
 for x in range(0, HORIZONTAL_CELL_COUNT):
     tmp = []
     for y in range(0, VERTICAL_CELL_COUNT):
@@ -906,8 +928,12 @@ while True:
         #입력 처리
         if event.type == pygame.MOUSEBUTTONUP:
             manager.mouseUp()
-        if not listener is None:
-            if event.type == pygame.KEYDOWN:
+            for ui in displayObjects:
+                ui.mouseDown(pygame.mouse.get_pos())
+        if event.type == pygame.KEYDOWN:
+            for ui in displayObjects:
+                ui.keyDown(event.key)
+            if not listener is None:
                 if event.key in ALL_CHECKING_KEYS:
                     continue
                 listener(event.key)
@@ -935,6 +961,8 @@ while True:
     screen.fill(SCREEN_COLOR)
     manager.drawScreen()
     manager.drawUI()
+    for ui in displayObjects:
+        ui.draw()
     pygame.display.update()
 
     clock.tick(TPS)
