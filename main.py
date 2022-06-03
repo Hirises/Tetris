@@ -1,3 +1,4 @@
+from multiprocessing import SimpleQueue
 import re
 import threading
 import pygame
@@ -106,12 +107,20 @@ class PacketType(Enum):
     ACCESS_ACCEPT = 1   #접속 허가
     ACCESS_DENY = 2     #접속 거부
     QUIT = 3            #접속 해제
+    BLOCK_MONE = 4      #블럭 이동
+    BLOCK_LANDING = 5   #블럭 고정
+    GAMEOVER = 6        #게임 오버
+    RESTART = 7         #다시 시작
 PACKET_INITIAL = {}
 PACKET_INITIAL[PacketType.INVALID] = "INVL"
 PACKET_INITIAL[PacketType.ACCESS_REQUIRE] = "ACRQ"
 PACKET_INITIAL[PacketType.ACCESS_ACCEPT] = "ACOK"
 PACKET_INITIAL[PacketType.ACCESS_DENY] = "ACNO"
 PACKET_INITIAL[PacketType.QUIT] = "QUIT"
+PACKET_INITIAL[PacketType.BLOCK_MONE] = "BKMV"
+PACKET_INITIAL[PacketType.BLOCK_LANDING] = "BKLD"
+PACKET_INITIAL[PacketType.GAMEOVER] = "GAEN"
+PACKET_INITIAL[PacketType.RESTART] = "REST"
 
 #초기화
 pygame.init()
@@ -133,8 +142,14 @@ netSocket = None     #소켓
 address = None  #주소
 networkState = NetworkState.Disconnected    #현재 상태
 networkThead = None        #네트워킹 담당 쓰레드
+packetPool = None           #패킷 풀
+packetPoolLock = threading.Lock()   #패킷 풀 락
 
 #인게임 변수
+class IngameState():
+    def __init__(self):
+        pass
+
 gameState = GameState.WaitNewBlock
 prePauseState = GameState.WaitNewBlock
 preAnimaionState = GameState.WaitNewBlock
@@ -442,6 +457,7 @@ def closeRoom(deep = 1):
     global networkState
     global address
     global networkThead
+    global packetPool
 
     #스텍 오버플로우 방지용도
     if deep > 5:
@@ -465,6 +481,7 @@ def closeRoom(deep = 1):
             #제대로 안 닫혔으면 닫힐 때까지 계속 실행
             closeRoom(deep + 1)
         return
+    packetPool = None
     netSocket = None
     networkThead = None
 
@@ -473,6 +490,7 @@ def waitEnter():
     global netSocket
     global networkState
     global address
+    global packetPool
 
     if netSocket is None:
         createRoom()
@@ -482,7 +500,6 @@ def waitEnter():
     except:
         closeRoom()
         return
-    networkState = NetworkState.Connecting
     
     try:
         (rawData, _address) = netSocket.recvfrom(1024)
@@ -490,6 +507,7 @@ def waitEnter():
     except:
         closeRoom()
         return
+    networkState = NetworkState.Connecting
     packet = Packet(PacketInOut.IN, data)
     if not packet.valid or not packet.type is PacketType.ACCESS_REQUIRE:
         #이상한 패킷을 받았으면 취소
@@ -506,15 +524,17 @@ def waitEnter():
     packet = Packet(PacketInOut.OUT, "", PacketType.ACCESS_ACCEPT)
     packet.sendTo(_address)
     address = _address
+    packetPool = SimpleQueue()
     networkState = NetworkState.Connected
 
-    print("connected")
+    runPacketListener()
 
 #방 접속
 def enterRoom(_ip, _port):
     global netSocket
     global networkState
     global address
+    global packetPool
 
     if netSocket is None:
         createRoom()
@@ -538,12 +558,62 @@ def enterRoom(_ip, _port):
         return
 
     address = _address
+    packetPool = SimpleQueue()
     networkState = NetworkState.Connected
 
-    print("connected")
+    runPacketListener()
 
+#무한 반복 패킷 수신 처리기
+def runPacketListener():
+    while(True):
+        #접속 종료 처리
+        if netSocket is None:
+            closeRoom()
+            break
 
+        try:
+            #패킷 대기
+            (rawData, _address) = netSocket.recvfrom(1024)
+            data = rawData.decode()
+        except:
+            #접속 종료 처리
+            if netSocket is None:
+                closeRoom()
+                break
+            continue
+        packet = Packet(PacketInOut.IN, data)
+        if not packet.valid or packet.type is PacketType.INVALID:
+            #이상한 패킷이면 취소
+            continue
+        
+        #큐에 추가
+        packetPoolLock.acquire()
+        packetPool.put(packet)
+        packetPoolLock.release()
 
+#다음 패킷 가져오기
+def getNextPacket():
+    if packetPool is None:
+        return Packet(PacketInOut.OUT, "", PacketType.INVALID)
+
+    packetPoolLock.acquire()
+    if len(packetPool) <= 0:
+        return Packet(PacketInOut.OUT, "", PacketType.INVALID)
+    packet = packetPool.pop()
+    packetPoolLock.release()
+
+    return packet
+
+#다음 패킷 존재 여부
+def hasNextPacket():
+    if packetPool is None:
+        return False
+
+    packetPoolLock.acquire()
+    isEmpty = len(packetPool) > 0
+    packetPoolLock.release()
+
+    return isEmpty
 
 
 
@@ -918,6 +988,15 @@ class GameManager:
                 for animation in animations:
                     animation.update()
     
+    #패킷 처리
+    def processPacket(self, packet):
+        if packet.type is PacketType.INVALID:
+            #오류 패킷
+            pass
+        elif packet.type is PacketType.QUIT:
+            #접속 해제 패킷
+            closeRoom()
+
     #다음 블럭 생성
     def spawnNewBlock(self):
         global curBlock
@@ -1133,10 +1212,22 @@ class GameManager:
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
                 #방 생성
+                if networkState is NetworkState.Disconnected:
+                    displayText("Waiting Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                elif networkState is NetworkState.Connecting:
+                    displayText("Connecting", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                elif networkState is NetworkState.Connected:
+                    displayText("Connected!", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+
                 if not networkState is NetworkState.Connected:
                     displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.EnterRoom:
                 #방 입장
+                if networkState is NetworkState.Connecting:
+                    displayText("Connecting", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                elif networkState is NetworkState.Connected:
+                    displayText("Connected!", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+
                 if networkState is NetworkState.Disconnected:
                     displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 elif networkState is NetworkState.Connecting:
@@ -1317,6 +1408,11 @@ while True:
                   #키 누르고 있을 때
                 manager.keyPressed(keyCode)
     
+    #패킷 처리
+    if gamemode is GameMode.Duel:
+        while hasNextPacket():
+            manager.processPacket(getNextPacket())
+
     #메인 로직 처리
     manager.update()
     
