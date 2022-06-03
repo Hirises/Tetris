@@ -1,4 +1,5 @@
 import re
+import threading
 import pygame
 import sys
 import random
@@ -23,9 +24,19 @@ class MenuState(Enum):
     KeySetting = 3
     NewWorkSetting = 4
     GameMode = 5
+    CreateRoom = 6
+    EnterRoom = 7
+class GameMode(Enum):
+    Sole = 1
+    Duel = 2
 class CellState(Enum):
     Empty = 0
     Occupied = 1
+class NetworkState(Enum):
+    Disconnected = -1
+    WaitUserInput = 0
+    Connecting = 1
+    Connected = 2
 class AnimationType(Enum):
     LineClear = 1
 class Animation:
@@ -117,6 +128,9 @@ KEY_FAST_DROP = pygame.K_SPACE
 KEY_PAUSE = pygame.K_q
 ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
 
+#네트워크 설정
+DEFAULT_PORT = 14500
+
 #초기화
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGTH))
@@ -125,11 +139,15 @@ clock = pygame.time.Clock()
 #글로벌 변수
 appState = AppState.Menu
 menuState = MenuState.Main
+gamemode = GameMode.Sole
 pressedKey = {}
 highScore = 0
 manager = None
 listener = None
-displayObjects = []
+displayObjects = {}
+room = None
+networkState = NetworkState.Disconnected
+networkThead = None
 
 #인게임 변수
 gameState = GameState.WaitNewBlock
@@ -298,6 +316,8 @@ def setPauseKey(keyCode):
     listener = None
     KEY_PAUSE = keyCode
 
+#네트워킹 관련 모듈
+
 def getMyIp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -305,6 +325,42 @@ def getMyIp():
     s.close()
     return ip
 
+def createRoom():
+    global room
+    global networkState
+
+    if not room is None:
+        closeRoom()
+
+    room = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    room.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
+    networkState = NetworkState.Disconnected
+
+def closeRoom():
+    global room
+    global networkState
+
+    if room is None:
+        return
+
+    room.close()
+    room = None
+    networkState = NetworkState.Disconnected
+
+def waitAccess():
+    global room
+    global networkState
+
+    if room is None:
+        createRoom()
+    networkState = NetworkState.Connecting
+
+    while True:
+        (rawData, address) = room.recvfrom(1024)
+        networkState = NetworkState.Connected
+        data = rawData.decode()
+        print("received: " + str(data) + " from " + str(address))
+        break
 #블럭 객체
 class Block:
     def __init__(self, originState, x = 0, 
@@ -656,7 +712,9 @@ class GameManager:
         global appState
         global menuState
         global gameState
+        global gamemode
         global listener
+        global networkThead
         
         pos = pygame.mouse.get_pos()
         
@@ -674,14 +732,22 @@ class GameManager:
                     sys.exit()
             elif menuState is MenuState.GameMode:
                 if isCollideIn(pos, SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140):
+                    gamemode = GameMode.Sole
                     self.gameReset()
                     self.gameStart()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #Create Room
-                    pass
+                    menuState = MenuState.CreateRoom
+                    createRoom()
+
+                    if not networkThead is None:
+                        return
+
+                    networkThead = threading.Thread(target=waitAccess, daemon=True)
+                    networkThead.start()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 165, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #Enter Room
-                    pass
+                    menuState = MenuState.EnterRoom
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     menuState = MenuState.Main
             elif menuState is MenuState.Setting:
@@ -727,6 +793,14 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #네트워크 설정 - Quit
                     menuState = MenuState.Setting
+            elif menuState == MenuState.CreateRoom:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    #방 생성 - Quit
+                    menuState = MenuState.GameMode
+            elif menuState == MenuState.EnterRoom:
+                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    #방 입장 - Quit
+                    menuState = MenuState.GameMode
         elif appState is AppState.Run:
             if gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
@@ -808,6 +882,12 @@ class GameManager:
                 displayText("Network Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
 
                 displayText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.CreateRoom:
+                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+            elif menuState is MenuState.EnterRoom:
+                displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
@@ -915,8 +995,18 @@ class GameManager:
      
 #초기화
 manager = GameManager()
-displayObjects.append(TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, menuState.NewWorkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content="14500",
-useMinMax= True, minValue=10000, maxValue=65535))
+displayObjects["port"] = TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, menuState.NewWorkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
+useMinMax= True, minValue=10000, maxValue=65535)
+displayObjects["ip1"] = TextField(SCREEN_WIDTH / 2 -220, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="127",
+useMinMax= True, minValue=0, maxValue=255)
+displayObjects["ip2"] = TextField(SCREEN_WIDTH / 2 - 125, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="0",
+useMinMax= True, minValue=0, maxValue=255)
+displayObjects["ip3"] = TextField(SCREEN_WIDTH / 2 - 30, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="0",
+useMinMax= True, minValue=0, maxValue=255)
+displayObjects["ip4"] = TextField(SCREEN_WIDTH / 2 + 65, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="1",
+useMinMax= True, minValue=0, maxValue=255)
+displayObjects["ipPort"] = TextField(SCREEN_WIDTH / 2 + 200, 130, 150, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
+useMinMax= True, minValue=10000, maxValue=65535)
 for x in range(0, HORIZONTAL_CELL_COUNT):
     tmp = []
     for y in range(0, VERTICAL_CELL_COUNT):
@@ -934,10 +1024,10 @@ while True:
         if event.type == pygame.MOUSEBUTTONUP:
             manager.mouseUp()
             for ui in displayObjects:
-                ui.mouseDown(pygame.mouse.get_pos())
+                displayObjects[ui].mouseDown(pygame.mouse.get_pos())
         if event.type == pygame.KEYDOWN:
             for ui in displayObjects:
-                ui.keyDown(event.key)
+                displayObjects[ui].keyDown(event.key)
             if not listener is None:
                 if event.key in ALL_CHECKING_KEYS:
                     continue
@@ -967,7 +1057,7 @@ while True:
     manager.drawScreen()
     manager.drawUI()
     for ui in displayObjects:
-        ui.draw()
+        displayObjects[ui].draw()
     pygame.display.update()
 
     clock.tick(TPS)
