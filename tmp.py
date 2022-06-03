@@ -130,6 +130,17 @@ ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAS
 
 #네트워크 설정
 DEFAULT_PORT = 14500
+NETWORK_VERSION = "v0.0.1"
+class PacketType(Enum):
+    INVALID = -1        #오류
+    ACCESS_REQUIRE = 0  #맨 처음 접속 요청
+    ACCESS_ACCEPT = 1   #접속 허가
+    ACCESS_DENY = 2     #접속 거부
+PACKET_INITIAL = {}
+PACKET_INITIAL[PacketType.INVALID] = "INVL"
+PACKET_INITIAL[PacketType.ACCESS_REQUIRE] = "ACRQ"
+PACKET_INITIAL[PacketType.ACCESS_ACCEPT] = "ACOK"
+PACKET_INITIAL[PacketType.ACCESS_DENY] = "ACNO"
 
 #초기화
 pygame.init()
@@ -160,6 +171,17 @@ curBlock = None
 fakeBlock = None
 lastX = 0
 animations = []
+
+
+
+
+
+
+
+
+
+
+
 
 #선정의 메소드
 
@@ -325,6 +347,52 @@ def getMyIp():
     s.close()
     return ip
 
+class Packet():
+    def __init__(self, type, data):
+       self.type = type
+       self.data = data
+       self.valid = True
+
+    def __init__(self, data):
+        initial = PACKET_INITIAL[PacketType.INVALID]
+        realData = ""
+
+        if len(data) < 4:
+            self.valid = False
+            return
+
+        initial = data[0:4]
+        if len(data) > 4:
+            realData = data[4:]
+
+        self.type = PacketType.INVALID
+        for type in PACKET_INITIAL:
+            if PACKET_INITIAL[type] == initial:
+                self.type = type
+                break
+        if self.type is PacketType.INVALID:
+            print("error")
+            self.valid = False
+            return
+        self.data = realData
+        self.type = True
+
+    def getPackedData(self):
+        if not self.valid:
+            return PACKET_INITIAL[PacketType.INVALID]
+
+        rawData = PACKET_INITIAL[self.type] + self.data
+
+        return rawData.encode()
+
+    def sendTo(self, address):
+        global room
+
+        if room is None:
+            return
+
+        room.sendto(self.getPackedData(), address)
+
 def createRoom():
     global room
     global networkState
@@ -333,7 +401,6 @@ def createRoom():
         closeRoom()
 
     room = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    room.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
     networkState = NetworkState.Disconnected
 
 def closeRoom():
@@ -347,7 +414,27 @@ def closeRoom():
     room = None
     networkState = NetworkState.Disconnected
 
-def waitAccess():
+def waitEnter():
+    global room
+    global networkState
+
+    if room is None:
+        createRoom()
+    room.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
+    networkState = NetworkState.Connecting
+
+    while True:
+        (rawData, address) = room.recvfrom(1024)
+        try:
+            data = rawData.decode()
+        except:
+            networkState = NetworkState.Disconnected
+            return
+        room.sendto("pong!".encode(), address)
+        networkState = NetworkState.Connected
+        break
+
+def enterRoom(_ip, _port):
     global room
     global networkState
 
@@ -356,11 +443,28 @@ def waitAccess():
     networkState = NetworkState.Connecting
 
     while True:
+        room.sendto("ping...".encode(), (_ip, _port))
         (rawData, address) = room.recvfrom(1024)
-        networkState = NetworkState.Connected
         data = rawData.decode()
-        print("received: " + str(data) + " from " + str(address))
+        networkState = NetworkState.Connected
+        print("client received: " + str(data) + " from " + str(address))
         break
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #블럭 객체
 class Block:
     def __init__(self, originState, x = 0, 
@@ -743,7 +847,7 @@ class GameManager:
                     if not networkThead is None:
                         return
 
-                    networkThead = threading.Thread(target=waitAccess, daemon=True)
+                    networkThead = threading.Thread(target=waitEnter, daemon=True)
                     networkThead.start()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 165, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #Enter Room
@@ -801,6 +905,19 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #방 입장 - Quit
                     menuState = MenuState.GameMode
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55):
+                    #Connect
+                    createRoom()
+
+                    if not networkThead is None:
+                        return
+
+                    _ip = displayObjects["ip1"].getContent()
+                    _ip += "." + displayObjects["ip2"].getContent()
+                    _ip += "." + displayObjects["ip3"].getContent()
+                    _ip += "." + displayObjects["ip4"].getContent()
+                    networkThead = threading.Thread(target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
+                    networkThead.start()
         elif appState is AppState.Run:
             if gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
@@ -887,7 +1004,7 @@ class GameManager:
             elif menuState is MenuState.CreateRoom:
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.EnterRoom:
-                displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
@@ -993,6 +1110,16 @@ class GameManager:
                                               CELL_SIZE * y + GAME_SCREEN_OFFSET[1], 
                                               CELL_SIZE - offsetX, CELL_SIZE - offsetY))
      
+
+
+
+
+
+
+
+
+
+
 #초기화
 manager = GameManager()
 displayObjects["port"] = TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, menuState.NewWorkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
