@@ -32,11 +32,6 @@ class GameMode(Enum):
 class CellState(Enum):
     Empty = 0
     Occupied = 1
-class NetworkState(Enum):
-    Disconnected = -1
-    WaitUserInput = 0
-    Connecting = 1
-    Connected = 2
 class AnimationType(Enum):
     LineClear = 1
 class Animation:
@@ -129,18 +124,29 @@ KEY_PAUSE = pygame.K_q
 ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
 
 #네트워크 설정
+
+
+class NetworkState(Enum):
+    Disconnected = -1
+    Connecting = 1
+    Connected = 2
 DEFAULT_PORT = 14500
 NETWORK_VERSION = "v0.0.1"
+class PacketInOut(Enum):
+    IN = 0
+    OUT = 1
 class PacketType(Enum):
     INVALID = -1        #오류
     ACCESS_REQUIRE = 0  #맨 처음 접속 요청
     ACCESS_ACCEPT = 1   #접속 허가
     ACCESS_DENY = 2     #접속 거부
+    QUIT = 3            #접속 해제
 PACKET_INITIAL = {}
 PACKET_INITIAL[PacketType.INVALID] = "INVL"
 PACKET_INITIAL[PacketType.ACCESS_REQUIRE] = "ACRQ"
 PACKET_INITIAL[PacketType.ACCESS_ACCEPT] = "ACOK"
 PACKET_INITIAL[PacketType.ACCESS_DENY] = "ACNO"
+PACKET_INITIAL[PacketType.QUIT] = "QUIT"
 
 #초기화
 pygame.init()
@@ -157,6 +163,7 @@ manager = None
 listener = None
 displayObjects = {}
 room = None
+address = None
 networkState = NetworkState.Disconnected
 networkThead = None
 
@@ -235,7 +242,7 @@ def displayInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain 
         displayTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
 
 class TextField:
-    def __init__(self, x, y, dx, dy, menuType, content = "", placeHolder = "", color = (0, 0, 0), backgroundColor = (255, 255, 255), size = 40, font = "arial", maxLength = 5,
+    def __init__(self, x, y, dx, dy, enableFunction, content = "", placeHolder = "", color = (0, 0, 0), backgroundColor = (255, 255, 255), size = 40, font = "arial", maxLength = 5,
     maxValue = 999, minValue = 0, useMinMax = False):
         self.x = x
         self.y = y
@@ -248,14 +255,14 @@ class TextField:
         self.size = size
         self.font = font
         self.focused = False
-        self.menuType = menuType
+        self.enableFunction = enableFunction
         self.maxLength = maxLength
         self.maxValue = maxValue
         self.minValue = minValue
         self.useMinMax = useMinMax
     
     def draw(self):
-        if menuState is self.menuType:
+        if self.enableFunction():
             if self.focused:
                 displayTextRect(self.content + "|", self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
             else:
@@ -265,7 +272,7 @@ class TextField:
                     displayTextRect(self.content, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
 
     def mouseDown(self, pos):
-        if menuState is self.menuType:
+        if self.enableFunction():
             if self.focused == False and isCollideIn(pos, self.x, self.y, self.dx, self.dy):
                 self.focused = True
             elif self.focused == True:
@@ -277,7 +284,7 @@ class TextField:
                         self.content = str(self.minValue)
 
     def keyDown(self, keyCode):
-        if menuState is self.menuType:
+        if self.enableFunction():
             if not self.focused:
                 return
 
@@ -306,7 +313,7 @@ def isCollideIn(pos, x, y, dx, dy):
     
     return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
 
-#람다 대용 키 입력 리스너
+#람다 대용
 def setLeftMoveKey(keyCode):
     global KEY_LEFT
     global listener
@@ -337,6 +344,13 @@ def setPauseKey(keyCode):
     global listener
     listener = None
     KEY_PAUSE = keyCode
+def whenNetworkSetting():
+    global menuState
+    return menuState is MenuState.NewWorkSetting
+def whenIpInputing():
+    global menuState
+    global networkState
+    return menuState is MenuState.EnterRoom and networkState is NetworkState.Disconnected
 
 #네트워킹 관련 모듈
 
@@ -348,34 +362,36 @@ def getMyIp():
     return ip
 
 class Packet():
-    def __init__(self, type, data):
-       self.type = type
-       self.data = data
-       self.valid = True
+    def __init__(self, _input, _data, _type = PacketType.INVALID):
+        if _input is PacketInOut.IN:
+            initial = PACKET_INITIAL[PacketType.INVALID]
+            realData = ""
 
-    def __init__(self, data):
-        initial = PACKET_INITIAL[PacketType.INVALID]
-        realData = ""
+            if len(_data) < 4:
+                self.valid = False
+                return
 
-        if len(data) < 4:
+            initial = _data[0:4]
+            if len(_data) > 4:
+                realData = _data[4:]
+
+            self.type = PacketType.INVALID
+            for type in PACKET_INITIAL:
+                if PACKET_INITIAL[type] == initial:
+                    self.type = type
+                    break
+            if self.type is PacketType.INVALID:
+                print("error")
+                self.valid = False
+                return
+            self.data = realData
+            self.valid = True
+        elif _input is PacketInOut.OUT:
+            self.type = _type
+            self.data = _data
+            self.valid = True
+        else:
             self.valid = False
-            return
-
-        initial = data[0:4]
-        if len(data) > 4:
-            realData = data[4:]
-
-        self.type = PacketType.INVALID
-        for type in PACKET_INITIAL:
-            if PACKET_INITIAL[type] == initial:
-                self.type = type
-                break
-        if self.type is PacketType.INVALID:
-            print("error")
-            self.valid = False
-            return
-        self.data = realData
-        self.type = True
 
     def getPackedData(self):
         if not self.valid:
@@ -391,64 +407,115 @@ class Packet():
         if room is None:
             return
 
-        room.sendto(self.getPackedData(), address)
+        try:
+            room.sendto(self.getPackedData(), address)
+        except:
+            closeRoom()
 
 def createRoom():
     global room
     global networkState
+    global address
 
-    if not room is None:
+    if not room is None or not address is None:
         closeRoom()
 
     room = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     networkState = NetworkState.Disconnected
+    address = None
 
-def closeRoom():
+def closeRoom(deep = 1):
     global room
     global networkState
+    global address
+    global networkThead
+
+    if deep > 5:
+        return
+
+    networkState = NetworkState.Disconnected
 
     if room is None:
         return
 
-    room.close()
+    if not address is None:
+        packet = Packet(PacketInOut.OUT, "", PacketType.QUIT)
+        packet.sendTo(address)
+        address = None
+
+    try:
+        room.close()
+    except:
+        if not room is None:
+            closeRoom(deep + 1)
+        return
     room = None
-    networkState = NetworkState.Disconnected
+    networkThead = None
 
 def waitEnter():
     global room
     global networkState
+    global address
 
     if room is None:
         createRoom()
-    room.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
+    try:
+        room.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
+    except:
+        closeRoom()
+        return
     networkState = NetworkState.Connecting
+    
+    try:
+        (rawData, _address) = room.recvfrom(1024)
+        data = rawData.decode()
+    except:
+        closeRoom()
+        return
+    packet = Packet(PacketInOut.IN, data)
+    if not packet.valid or not packet.type is PacketType.ACCESS_REQUIRE:
+        closeRoom()
+        return
+    if not packet.data == NETWORK_VERSION:
+        packet = Packet(PacketInOut.OUT, NETWORK_VERSION, PacketType.ACCESS_DENY)
+        packet.sendTo(_address)
+        closeRoom()
+        return
 
-    while True:
-        (rawData, address) = room.recvfrom(1024)
-        try:
-            data = rawData.decode()
-        except:
-            networkState = NetworkState.Disconnected
-            return
-        room.sendto("pong!".encode(), address)
-        networkState = NetworkState.Connected
-        break
+    packet = Packet(PacketInOut.OUT, "", PacketType.ACCESS_ACCEPT)
+    packet.sendTo(_address)
+    address = _address
+    networkState = NetworkState.Connected
+
+    print("connected")
 
 def enterRoom(_ip, _port):
     global room
     global networkState
+    global address
 
     if room is None:
         createRoom()
     networkState = NetworkState.Connecting
+    
+    packet = Packet(PacketInOut.OUT, NETWORK_VERSION, PacketType.ACCESS_REQUIRE)
+    packet.sendTo((_ip, _port))
 
-    while True:
-        room.sendto("ping...".encode(), (_ip, _port))
-        (rawData, address) = room.recvfrom(1024)
+    try:
+        (rawData, _address) = room.recvfrom(1024)
         data = rawData.decode()
-        networkState = NetworkState.Connected
-        print("client received: " + str(data) + " from " + str(address))
-        break
+    except:
+        closeRoom()
+        return
+    packet = Packet(PacketInOut.IN, data)
+    if not packet.valid or not packet.type is PacketType.ACCESS_ACCEPT:
+        closeRoom()
+        return
+
+    address = _address
+    networkState = NetworkState.Connected
+
+    print("connected")
 
 
 
@@ -819,6 +886,7 @@ class GameManager:
         global gamemode
         global listener
         global networkThead
+        global networkState
         
         pos = pygame.mouse.get_pos()
         
@@ -899,25 +967,33 @@ class GameManager:
                     menuState = MenuState.Setting
             elif menuState == MenuState.CreateRoom:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
-                    #방 생성 - Quit
-                    menuState = MenuState.GameMode
+                    if not networkState is NetworkState.Connected:
+                        #방 생성 - Quit
+                        closeRoom()
+                        menuState = MenuState.GameMode
             elif menuState == MenuState.EnterRoom:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
-                    #방 입장 - Quit
-                    menuState = MenuState.GameMode
+                    if not networkState is NetworkState.Connected:
+                        #방 입장 - Quit
+                        closeRoom()
+                        menuState = MenuState.GameMode
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55):
-                    #Connect
-                    createRoom()
+                    if networkState is NetworkState.Disconnected:
+                        #Connect
+                        createRoom()
 
-                    if not networkThead is None:
-                        return
+                        if not networkThead is None:
+                            return
 
-                    _ip = displayObjects["ip1"].getContent()
-                    _ip += "." + displayObjects["ip2"].getContent()
-                    _ip += "." + displayObjects["ip3"].getContent()
-                    _ip += "." + displayObjects["ip4"].getContent()
-                    networkThead = threading.Thread(target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
-                    networkThead.start()
+                        _ip = displayObjects["ip1"].getContent()
+                        _ip += "." + displayObjects["ip2"].getContent()
+                        _ip += "." + displayObjects["ip3"].getContent()
+                        _ip += "." + displayObjects["ip4"].getContent()
+                        networkThead = threading.Thread(daemon=True, target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
+                        networkThead.start()
+                    elif networkState is NetworkState.Connecting:
+                        #Cancel
+                        closeRoom()
         elif appState is AppState.Run:
             if gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
@@ -1002,11 +1078,16 @@ class GameManager:
 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if not networkState is NetworkState.Connected:
+                    displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.EnterRoom:
-                displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if networkState is NetworkState.Disconnected:
+                    displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                elif networkState is NetworkState.Connecting:
+                    displayInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if not networkState is NetworkState.Connected:
+                    displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
                 #도움말
                 displayText("Help", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
@@ -1122,17 +1203,17 @@ class GameManager:
 
 #초기화
 manager = GameManager()
-displayObjects["port"] = TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, menuState.NewWorkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
+displayObjects["port"] = TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, whenNetworkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
 useMinMax= True, minValue=10000, maxValue=65535)
-displayObjects["ip1"] = TextField(SCREEN_WIDTH / 2 -220, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="127",
+displayObjects["ip1"] = TextField(SCREEN_WIDTH / 2 -220, 130, 80, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="127",
 useMinMax= True, minValue=0, maxValue=255)
-displayObjects["ip2"] = TextField(SCREEN_WIDTH / 2 - 125, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="0",
+displayObjects["ip2"] = TextField(SCREEN_WIDTH / 2 - 125, 130, 80, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="0",
 useMinMax= True, minValue=0, maxValue=255)
-displayObjects["ip3"] = TextField(SCREEN_WIDTH / 2 - 30, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="0",
+displayObjects["ip3"] = TextField(SCREEN_WIDTH / 2 - 30, 130, 80, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="0",
 useMinMax= True, minValue=0, maxValue=255)
-displayObjects["ip4"] = TextField(SCREEN_WIDTH / 2 + 65, 130, 80, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="1",
+displayObjects["ip4"] = TextField(SCREEN_WIDTH / 2 + 65, 130, 80, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="1",
 useMinMax= True, minValue=0, maxValue=255)
-displayObjects["ipPort"] = TextField(SCREEN_WIDTH / 2 + 200, 130, 150, 40, menuState.EnterRoom, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
+displayObjects["ipPort"] = TextField(SCREEN_WIDTH / 2 + 200, 130, 150, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
 useMinMax= True, minValue=10000, maxValue=65535)
 for x in range(0, HORIZONTAL_CELL_COUNT):
     tmp = []
