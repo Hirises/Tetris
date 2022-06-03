@@ -137,6 +137,21 @@ manager = None
 listener = None #키 설정 용도
 displayObjects = {} #텍스트 필드들
 
+#인게임 변수
+class IngameValue():
+    def __init__(self):
+        self.gameState = GameState.WaitNewBlock
+        self.prePauseState = GameState.WaitNewBlock
+        self.preAnimaionState = GameState.WaitNewBlock
+        self.cells = []
+        self.score = 0
+        self.combo = 0
+        self.curBlock = None
+        self.fakeBlock = None
+        self.lastX = 0
+        self.animations = []
+localGameValue = IngameValue()
+
 #네트워킹 변수
 netSocket = None     #소켓
 address = None  #주소
@@ -144,22 +159,7 @@ networkState = NetworkState.Disconnected    #현재 상태
 networkThead = None        #네트워킹 담당 쓰레드
 packetPool = None           #패킷 풀
 packetPoolLock = threading.Lock()   #패킷 풀 락
-
-#인게임 변수
-class IngameState():
-    def __init__(self):
-        pass
-
-gameState = GameState.WaitNewBlock
-prePauseState = GameState.WaitNewBlock
-preAnimaionState = GameState.WaitNewBlock
-cells = []
-score = 0
-combo = 0
-curBlock = None
-fakeBlock = None
-lastX = 0
-animations = []
+networkGameValue = None
 
 
 
@@ -302,16 +302,13 @@ def isCollideIn(pos, x, y, dx, dy):
 
 class Animation:
     def __init__(self, type, var):
-        global gameState
-        global preAnimaionState
-
         self.type = type
         self.tick = 0
         self.var = var
 
-        if not gameState is GameState.Animating:
-            preAnimaionState = gameState
-            gameState = GameState.Animating
+        if not localGameValue.gameState is GameState.Animating:
+            localGameValue.preAnimaionState = localGameValue.gameState
+            localGameValue.gameState = GameState.Animating
 
     def update(self):
         self.tick += 1
@@ -319,21 +316,21 @@ class Animation:
             if self.tick == 1:
                 for x in range(0, HORIZONTAL_CELL_COUNT):
                     for y in self.var:
-                        cells[x][y].changeState(
+                        localGameValue.cells[x][y].changeState(
                             CellState.Occupied, (255, 255, 255))
             elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
                 for x in range(0, HORIZONTAL_CELL_COUNT):
                     for y in self.var:
-                        cells[x][y].changeState(CellState.Empty, (255, 0, 0))
+                        localGameValue.cells[x][y].changeState(CellState.Empty, (255, 0, 0))
                 for locY in sorted(self.var):
                     for y in range(locY, 1, -1):
                         for x in range(0, HORIZONTAL_CELL_COUNT):
-                            cells[x][y].changeState(
-                                cells[x][y - 1].state, cells[x][y - 1].color)
-                animations.remove(self)
+                            localGameValue.cells[x][y].changeState(
+                                localGameValue.cells[x][y - 1].state, localGameValue.cells[x][y - 1].color)
+                localGameValue.animations.remove(self)
             elif self.tick >= 3:
                 for y in self.var:
-                    cells[self.tick -
+                    localGameValue.cells[self.tick -
                           3][y].changeState(CellState.Empty, (255, 255, 255))
 
 #람다 대용
@@ -631,8 +628,6 @@ def hasNextPacket():
 class Block:
     def __init__(self, originState, x = 0, 
                  dirZ = 1, dirX = 1, dirY = 1, color = (255, 0, 0)):
-        global fakeBlock
-
         self.originState = originState
         self.x = x
         self.y = 0
@@ -653,7 +648,7 @@ class Block:
             return
 
         #떨어질 위치 미리보기 생성
-        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
+        localGameValue.fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     #회전 이후의 블럭 상태
     def getState(self, dirZ, dirX, dirY):
@@ -673,8 +668,6 @@ class Block:
         return state
     
     def turnRight(self):
-        global fakeBlock
-
         dirZ = self.dirZ
         dirX = self.dirX
         dirY = self.dirY
@@ -700,11 +693,9 @@ class Block:
         self.dirY = dirY
         self.y = y
         #페이크 블럭 반영
-        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
+        localGameValue.fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     def turnLeft(self):
-        global fakeBlock
-
         dirZ = self.dirZ
         dirX = self.dirX
         dirY = self.dirY
@@ -730,7 +721,7 @@ class Block:
         self.dirY = dirY
         self.y = y
         #페이크 블럭 반영
-        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
+        localGameValue.fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
     
     #1칸 떨어지기
     def fall(self):
@@ -742,25 +733,16 @@ class Block:
     
     #이동
     def move(self, dx, dy):
-        global fakeBlock
-
         if self.isColideWith(self.curState, self.x + dx, self.y + dy):
             return
         
         self.x += dx
         self.y += dy
         #페이크 블럭 반영
-        fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
+        localGameValue.fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     #블럭 고정
     def landing(self):
-        global curBlock
-        global gameState
-        global lastX
-        global score
-        global fakeBlock
-        global combo
-        
         #블럭 배치
         for x in range(0, len(self.curState)):
             for y in range(0, len(self.curState[0])):
@@ -768,7 +750,7 @@ class Block:
                     continue
                 
                 if self.curState[x][y] is CellState.Occupied:
-                    cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
+                    localGameValue.cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
         
         #게임 종료 감지
         if self.y - len(self.curState[0]) + 1 < 0:
@@ -777,28 +759,28 @@ class Block:
             return
         
         #다음 블럭 요청
-        lastX = self.x
-        gameState = GameState.WaitNewBlock
-        curBlock = None
-        fakeBlock = None
+        localGameValue.lastX = self.x
+        localGameValue.gameState = GameState.WaitNewBlock
+        localGameValue.curBlock = None
+        localGameValue.fakeBlock = None
 
         #라인 클리어 처리
         lines = []
         for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
             if self.lineCheck(y):
                 lines.append(y)
-                score += SCORE_PER_LINE + COMBO_SCORE * combo
-                combo += 1
+                localGameValue.score += SCORE_PER_LINE + COMBO_SCORE * localGameValue.combo
+                localGameValue.combo += 1
         #콤보 점수 처리
         if len(lines) > 0:
-            animations.append(Animation(AnimationType.LineClear, lines))
+            localGameValue.animations.append(Animation(AnimationType.LineClear, lines))
         else:
-            combo = 0
+            localGameValue.combo = 0
             
     #라인 클리어 확인
     def lineCheck(self, y):
         for x in range(0, HORIZONTAL_CELL_COUNT):
-            if cells[x][y].state is CellState.Empty:
+            if localGameValue.cells[x][y].state is CellState.Empty:
                 return False
 
         return True
@@ -820,7 +802,7 @@ class Block:
                     continue
                 
                 if (state[x][y] is CellState.Occupied 
-                    and cells[x + locX][y + locY].state is CellState.Occupied):
+                    and localGameValue.cells[x + locX][y + locY].state is CellState.Occupied):
                     return True
         return False
 
@@ -848,7 +830,7 @@ class FakeBlock:
                     continue
                 
                 if (self.state[x][y] is CellState.Occupied 
-                    and cells[x + self.x][y + locY].state is CellState.Occupied):
+                    and localGameValue.cells[x + self.x][y + locY].state is CellState.Occupied):
                     return True
         return False
 
@@ -869,43 +851,34 @@ class GameManager:
     
     #게임 시작
     def gameStart(self):
-        global gameState
         global appState
         
         self.gameReset()
-        gameState = GameState.WaitNewBlock
+        localGameValue.gameState = GameState.WaitNewBlock
         appState = AppState.Run
     
     #게임 리셋
     def gameReset(self):
-        global score
-        global cells
-        global curBlock
-        global gameState
-        global lastX
-        global combo
-        
-        lastX = 0
-        gameState = gameState.WaitNewBlock
+        localGameValue.lastX = 0
+        localGameValue.gameState = GameState.WaitNewBlock
         self.tick = 0
-        curBlock = None
-        score = 0
-        combo = 0
-        cells.clear()
+        localGameValue.curBlock = None
+        localGameValue.score = 0
+        localGameValue.combo = 0
+        localGameValue.cells.clear()
         for x in range(0, HORIZONTAL_CELL_COUNT):
             tmp = []
             for y in range(0, VERTICAL_CELL_COUNT):
                 tmp.append(Cell())
-            cells.append(tmp)
+            localGameValue.cells.append(tmp)
     
     #게임 종료
     def gameEnd(self):
-        global gameState
         global highScore
         
-        gameState = GameState.GameOver
-        if score > highScore:
-            highScore = score
+        localGameValue.gameState = GameState.GameOver
+        if localGameValue.score > highScore:
+            highScore = localGameValue.score
     
     #키를 눌렀다가 땔 때
     def keyUp(self, keyCode):
@@ -916,76 +889,72 @@ class GameManager:
     
     #키를 누르고 있는 동안 일정 틱마다 호출
     def keyPressed(self, keyCode):
-        if not appState is AppState.Run or gameState is GameState.GameOver or gameState is GameState.Paused:
+        if not appState is AppState.Run or localGameValue.gameState is GameState.GameOver or localGameValue.gameState is GameState.Paused:
             return
         
         if keyCode == KEY_LEFT:
-            if not curBlock is None:
-                curBlock.move(-1, 0)
+            if not localGameValue.curBlock is None:
+                localGameValue.curBlock.move(-1, 0)
         if keyCode == KEY_RIGHT:
-            if not curBlock is None:
-                curBlock.move(1, 0)
+            if not localGameValue.curBlock is None:
+                localGameValue.curBlock.move(1, 0)
     
     #키를 눌렀을 때 1회 호출
     def keyDown(self, keyCode):
         global TICK_PER_CELL
-        global gameState
-        global prePauseState
         
         if keyCode == KEY_FAST_DROP:
             TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
         
-        if not appState is AppState.Run or gameState is GameState.GameOver:
+        if not appState is AppState.Run or localGameValue.gameState is GameState.GameOver:
             return
         
         #Pause 검사
         if keyCode == KEY_PAUSE:
-            if not gameState is GameState.GameOver:
-                if gameState is GameState.Paused:
+            if not localGameValue.gameState is GameState.GameOver:
+                if localGameValue.gameState is GameState.Paused:
                     #다시 누르면 Pause 해제
-                    gameState = prePauseState
+                    localGameValue.gameState = localGameValue.prePauseState
                 else:
-                    prePauseState = gameState
-                    gameState = GameState.Paused
+                    localGameValue.prePauseState = localGameValue.ameState
+                    localGameValue.gameState = GameState.Paused
 
-        if  gameState is GameState.Paused:
+        if  localGameValue.gameState is GameState.Paused:
             return
 
         #이동 and 회전 검사
         if keyCode == KEY_LEFT:
-            if not curBlock is None:
-                curBlock.move(-1, 0)
+            if not localGameValue.curBlock is None:
+                localGameValue.curBlock.move(-1, 0)
         if keyCode == KEY_RIGHT:
-            if not curBlock is None:
-                curBlock.move(1, 0)
+            if not localGameValue.curBlock is None:
+                localGameValue.curBlock.move(1, 0)
             
         if keyCode == KEY_TURN_LEFT:
-            if not curBlock is None:
-                curBlock.turnLeft()
+            if not localGameValue.curBlock is None:
+                localGameValue.curBlock.turnLeft()
         if keyCode == KEY_TURN_RIGHT:
-            if not curBlock is None:
-                curBlock.turnRight()
+            if not localGameValue.curBlock is None:
+                localGameValue.curBlock.turnRight()
     
     #틱당 1회 실행됨
     def update(self):
-        global gameState
-
         if appState is AppState.Run:
             self.tick += 1
             
             #GameState별 처리
-            if gameState is GameState.WaitNewBlock:
-                if curBlock is None:
+            if localGameValue.gameState is GameState.WaitNewBlock:
+                if localGameValue.curBlock is None:
                     self.spawnNewBlock()
-            elif gameState is GameState.Drop:
+            elif localGameValue.gameState is GameState.Drop:
                 if self.tick % TICK_PER_CELL == 0:
-                    curBlock.fall()
-            elif gameState is GameState.Animating:
-                if len(animations) == 0:
+                    localGameValue.curBlock.fall()
+            elif localGameValue.gameState is GameState.Animating:
+                if len(localGameValue.animations) == 0:
                     #애니매이션 완료시 이전 상태로 복귀
-                    gameState = preAnimaionState
+                    localGameValue.gameState = localGameValue.preAnimaionState
                 #애니매이션 재생
-                for animation in animations:
+                for animation in localGameValue.animations:
                     animation.update()
     
     #패킷 처리
@@ -999,19 +968,15 @@ class GameManager:
 
     #다음 블럭 생성
     def spawnNewBlock(self):
-        global curBlock
-        global gameState
-        
-        curBlock = Block(ALL_BLOCK_STATES[random.randint(0, len(ALL_BLOCK_STATES) - 1)],
+        localGameValue.curBlock = Block(ALL_BLOCK_STATES[random.randint(0, len(ALL_BLOCK_STATES) - 1)],
                          color = ALL_BLOCK_COLORS[random.randint(0, len(ALL_BLOCK_COLORS) - 1)],
-                         dirZ = randomBit(), dirX = randomBit(), dirY = randomBit(), x = lastX)
-        gameState = GameState.Drop
+                         dirZ = randomBit(), dirX = randomBit(), dirY = randomBit(), x = localGameValue.lastX)
+        localGameValue.gameState = GameState.Drop
 
     #마우스 클릭시 
     def mouseUp(self):
         global appState
         global menuState
-        global gameState
         global gamemode
         global listener
         global networkThead
@@ -1126,7 +1091,7 @@ class GameManager:
                         #방 입장 - Cancel
                         closeRoom()
         elif appState is AppState.Run:
-            if gameState is GameState.GameOver:
+            if localGameValue.gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
                     #게임 오버 - Restart
                     self.gameReset()
@@ -1135,10 +1100,10 @@ class GameManager:
                     #게임 오버 - Back To Menu
                     menuState = MenuState.Main
                     appState = AppState.Menu
-            elif gameState is GameState.Paused:
+            elif localGameValue.gameState is GameState.Paused:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40):
                     #정지 메뉴 - Continue
-                    gameState = prePauseState
+                    localGameValue.gameState = localGameValue.prePauseState
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40):
                     #정지 메뉴 - Restart
                     self.gameEnd()
@@ -1247,25 +1212,25 @@ class GameManager:
                 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
         elif appState is AppState.Run:
-            if gameState is GameState.GameOver:
+            if localGameValue.gameState is GameState.GameOver:
                 #게임 오버
                 displayTextRect("Game Over", SCREEN_WIDTH / 2, 100, dx = SCREEN_WIDTH, dy = 70, size = 60, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                displayTextRect("score " + str(score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
+                displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
                 displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-            elif gameState is GameState.Paused:
+            elif localGameValue.gameState is GameState.Paused:
                 #정지 메뉴
                 displayTextRect("Paused", SCREEN_WIDTH / 2, 100, dx = SCREEN_WIDTH, dy = 70, size = 60, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                displayTextRect("score " + str(score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
+                displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
                 displayInterectibleTextRect(pos, "Continue", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             else:
-                displayText(str(score), 500, 50, color = (255, 255, 255), font = "hancommalangmalang")
+                displayText(str(localGameValue.score), 500, 50, color = (255, 255, 255), font = "hancommalangmalang")
         
     def drawScreen(self):
         if appState is AppState.Run:
@@ -1285,22 +1250,22 @@ class GameManager:
                     if y + 1 >= VERTICAL_CELL_COUNT:
                         offsetY = 0
                             
-                    if cells[x][y].state is CellState.Empty:
+                    if localGameValue.cells[x][y].state is CellState.Empty:
                         pygame.draw.rect(screen, EMPTY_CELL_COLOR, 
                                          (CELL_SIZE * x + GAME_SCREEN_OFFSET[0], 
                                           CELL_SIZE * y + GAME_SCREEN_OFFSET[1], 
                                           CELL_SIZE - offsetX, CELL_SIZE - offsetY))
                     else:
-                        pygame.draw.rect(screen, cells[x][y].color, 
+                        pygame.draw.rect(screen, localGameValue.cells[x][y].color, 
                                          (CELL_SIZE * x + GAME_SCREEN_OFFSET[0],
                                           CELL_SIZE * y + GAME_SCREEN_OFFSET[1], 
                                           CELL_SIZE - offsetX, CELL_SIZE - offsetY))
             
             #페이크 블럭 그리기
-            if not fakeBlock is None:
-                state = fakeBlock.state
-                for x in range(fakeBlock.x, fakeBlock.x + len(state)):
-                    for y in range(fakeBlock.y, fakeBlock.y + len(state[0])):
+            if not localGameValue.fakeBlock is None:
+                state = localGameValue.fakeBlock.state
+                for x in range(localGameValue.fakeBlock.x, localGameValue.fakeBlock.x + len(state)):
+                    for y in range(localGameValue.fakeBlock.y, localGameValue.fakeBlock.y + len(state[0])):
                         if y < 0:
                             continue
                         
@@ -1311,17 +1276,17 @@ class GameManager:
                         if y - 1 == VERTICAL_CELL_COUNT:
                             offsetY = 0
                         
-                        if state[x - fakeBlock.x][y - fakeBlock.y] is CellState.Occupied:
+                        if state[x - localGameValue.fakeBlock.x][y - localGameValue.fakeBlock.y] is CellState.Occupied:
                             pygame.draw.rect(screen, FAKE_BLOCK_COLOR, 
                                              (CELL_SIZE * x + GAME_SCREEN_OFFSET[0], 
                                               CELL_SIZE * y + GAME_SCREEN_OFFSET[1], 
                                               CELL_SIZE - offsetX, CELL_SIZE - offsetY))
             
             #블럭 그리기
-            if not curBlock is None:
-                state = curBlock.curState
-                for x in range(curBlock.x, curBlock.x + len(state)):
-                    for y in range(curBlock.y, curBlock.y + len(state[0])):
+            if not localGameValue.curBlock is None:
+                state = localGameValue.curBlock.curState
+                for x in range(localGameValue.curBlock.x, localGameValue.curBlock.x + len(state)):
+                    for y in range(localGameValue.curBlock.y, localGameValue.curBlock.y + len(state[0])):
                         if y < 0:
                             continue
                         
@@ -1332,8 +1297,8 @@ class GameManager:
                         if y - 1 == VERTICAL_CELL_COUNT:
                             offsetY = 0
                         
-                        if state[x - curBlock.x][y - curBlock.y] is CellState.Occupied:
-                            pygame.draw.rect(screen, curBlock.color, 
+                        if state[x - localGameValue.curBlock.x][y - localGameValue.curBlock.y] is CellState.Occupied:
+                            pygame.draw.rect(screen, localGameValue.curBlock.color, 
                                              (CELL_SIZE * x + GAME_SCREEN_OFFSET[0], 
                                               CELL_SIZE * y + GAME_SCREEN_OFFSET[1], 
                                               CELL_SIZE - offsetX, CELL_SIZE - offsetY))
