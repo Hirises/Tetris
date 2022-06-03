@@ -3,69 +3,8 @@ import threading
 import pygame
 import sys
 import random
-from enum import Enum
-
 import socket
-
-#State Enum 정의
-class AppState(Enum):
-    Menu = 0
-    Run = 1
-class GameState(Enum):
-    GameOver = -1
-    Paused = 0
-    Drop = 1
-    WaitNewBlock = 2
-    Animating = 3
-class MenuState(Enum):
-    Main = 0
-    Setting = 1
-    Help = 2
-    KeySetting = 3
-    NewWorkSetting = 4
-    GameMode = 5
-    CreateRoom = 6
-    EnterRoom = 7
-class GameMode(Enum):
-    Sole = 1
-    Duel = 2
-class CellState(Enum):
-    Empty = 0
-    Occupied = 1
-class AnimationType(Enum):
-    LineClear = 1
-class Animation:
-    def __init__(self, type, var):
-        global gameState
-        global preAnimaionState
-
-        self.type = type
-        self.tick = 0
-        self.var = var
-
-        if not gameState is GameState.Animating:
-            preAnimaionState = gameState
-            gameState = GameState.Animating
-
-    def update(self):
-        self.tick += 1
-        if self.type == AnimationType.LineClear:
-            if self.tick == 1:
-                for x in range(0, HORIZONTAL_CELL_COUNT):
-                    for y in self.var:
-                        cells[x][y].changeState(CellState.Occupied, (255, 255, 255))
-            elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
-                for x in range(0, HORIZONTAL_CELL_COUNT):
-                    for y in self.var:
-                        cells[x][y].changeState(CellState.Empty, (255, 0, 0))
-                for locY in sorted(self.var):
-                    for y in range(locY, 1, -1):
-                        for x in range(0, HORIZONTAL_CELL_COUNT):
-                            cells[x][y].changeState(cells[x][y - 1].state, cells[x][y - 1].color)
-                animations.remove(self)
-            elif self.tick >= 3:
-                for y in self.var:
-                    cells[self.tick - 3][y].changeState(CellState.Empty, (255, 255, 255))
+from enum import Enum
 
 #화면 설정
 SCREEN_WIDTH = 600
@@ -75,15 +14,41 @@ SCREEN_COLOR = (40, 20, 80)
 GAME_SCREEN_COLOR = (150, 150, 150)
 GAME_SCREEN_OFFSET = (200, 0)
 
+#게임 설정
+class AppState(Enum):   #앱 상태
+    Menu = 0
+    Run = 1
+class GameState(Enum):  #게임 상태
+    GameOver = -1
+    Paused = 0
+    Drop = 1
+    WaitNewBlock = 2
+    Animating = 3
+class MenuState(Enum):  #메뉴 위치
+    Main = 0
+    Setting = 1
+    Help = 2
+    KeySetting = 3
+    NewWorkSetting = 4
+    GameMode = 5
+    CreateRoom = 6
+    EnterRoom = 7
+class GameMode(Enum):   #게임 모드
+    Sole = 1
+    Duel = 2
+
 #셀 설정
 HORIZONTAL_CELL_COUNT = 10
 VERTICAL_CELL_COUNT = 20
 CELL_SIZE = 20
 CELL_OFFSET = 1
 EMPTY_CELL_COLOR = (0, 0, 0)
+class CellState(Enum):
+    Empty = 0
+    Occupied = 1
 
 #블럭 설정
-DEFAULT_TICK_PER_CELL = 10
+DEFAULT_TICK_PER_CELL = 10  #블럭이 1칸 떨어지는데 걸리는 틱 수
 ACCELERATED_TICK_PRE_CELL = 2
 TICK_PER_CELL = DEFAULT_TICK_PER_CELL
 SCORE_PER_LINE = 100
@@ -111,6 +76,8 @@ ALL_BLOCK_STATES = [
     ]
 ALL_BLOCK_COLORS = [(0, 255, 0), (0, 0, 255), (255, 0, 0), (255, 255, 0), (255, 0, 255)]
 FAKE_BLOCK_COLOR = (255, 255, 255)
+class AnimationType(Enum):
+    LineClear = 1
 
 #키 설정
 KEY_INPUT_DELAY = 7
@@ -124,8 +91,6 @@ KEY_PAUSE = pygame.K_q
 ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
 
 #네트워크 설정
-
-
 class NetworkState(Enum):
     Disconnected = -1
     Connecting = 1
@@ -147,6 +112,7 @@ PACKET_INITIAL[PacketType.ACCESS_REQUIRE] = "ACRQ"
 PACKET_INITIAL[PacketType.ACCESS_ACCEPT] = "ACOK"
 PACKET_INITIAL[PacketType.ACCESS_DENY] = "ACNO"
 PACKET_INITIAL[PacketType.QUIT] = "QUIT"
+
 #초기화
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGTH))
@@ -159,12 +125,14 @@ gamemode = GameMode.Sole
 pressedKey = {}
 highScore = 0
 manager = None
-listener = None
-displayObjects = {}
-room = None
-address = None
-networkState = NetworkState.Disconnected
-networkThead = None
+listener = None #키 설정 용도
+displayObjects = {} #텍스트 필드들
+
+#네트워킹 변수
+netSocket = None     #소켓
+address = None  #주소
+networkState = NetworkState.Disconnected    #현재 상태
+networkThead = None        #네트워킹 담당 쓰레드
 
 #인게임 변수
 gameState = GameState.WaitNewBlock
@@ -191,7 +159,7 @@ animations = []
 
 #선정의 메소드
 
-def randomBit():
+def randomBit():    #랜덤으로 -1 또는 1을 반환
     if random.randint(0, 1) == 0:
         return 1
     else:
@@ -240,6 +208,7 @@ def displayInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain 
     else:
         displayTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
 
+#텍스트를 입력받을 수 있는 필드 (숫자만 가능)
 class TextField:
     def __init__(self, x, y, dx, dy, enableFunction, content = "", placeHolder = "", color = (0, 0, 0), backgroundColor = (255, 255, 255), size = 40, font = "arial", maxLength = 5,
     maxValue = 999, minValue = 0, useMinMax = False):
@@ -260,6 +229,7 @@ class TextField:
         self.minValue = minValue
         self.useMinMax = useMinMax
     
+    #화면에 출력
     def draw(self):
         if self.enableFunction():
             if self.focused:
@@ -270,6 +240,7 @@ class TextField:
                 else:
                     displayTextRect(self.content, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
 
+    #클릭 검사
     def mouseDown(self, pos):
         if self.enableFunction():
             if self.focused == False and isCollideIn(pos, self.x, self.y, self.dx, self.dy):
@@ -282,6 +253,7 @@ class TextField:
                     elif int(self.content) < self.minValue:
                         self.content = str(self.minValue)
 
+    #키 입력 처리
     def keyDown(self, keyCode):
         if self.enableFunction():
             if not self.focused:
@@ -295,6 +267,7 @@ class TextField:
             elif re.match("[0-9]|\[[0-9]\]", pygame.key.name(keyCode)) and len(self.content) < self.maxLength:
                 self.content = self.content + str(pygame.key.name(keyCode))
 
+    #현재 내용 반환
     def getContent(self):
         if self.content == "":
             return self.placeHolder
@@ -311,6 +284,42 @@ def isCollideIn(pos, x, y, dx, dy):
     downY = y - dy / 2
     
     return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
+
+class Animation:
+    def __init__(self, type, var):
+        global gameState
+        global preAnimaionState
+
+        self.type = type
+        self.tick = 0
+        self.var = var
+
+        if not gameState is GameState.Animating:
+            preAnimaionState = gameState
+            gameState = GameState.Animating
+
+    def update(self):
+        self.tick += 1
+        if self.type == AnimationType.LineClear:
+            if self.tick == 1:
+                for x in range(0, HORIZONTAL_CELL_COUNT):
+                    for y in self.var:
+                        cells[x][y].changeState(
+                            CellState.Occupied, (255, 255, 255))
+            elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
+                for x in range(0, HORIZONTAL_CELL_COUNT):
+                    for y in self.var:
+                        cells[x][y].changeState(CellState.Empty, (255, 0, 0))
+                for locY in sorted(self.var):
+                    for y in range(locY, 1, -1):
+                        for x in range(0, HORIZONTAL_CELL_COUNT):
+                            cells[x][y].changeState(
+                                cells[x][y - 1].state, cells[x][y - 1].color)
+                animations.remove(self)
+            elif self.tick >= 3:
+                for y in self.var:
+                    cells[self.tick -
+                          3][y].changeState(CellState.Empty, (255, 255, 255))
 
 #람다 대용
 def setLeftMoveKey(keyCode):
@@ -352,6 +361,7 @@ def whenIpInputing():
     return menuState is MenuState.EnterRoom and networkState is NetworkState.Disconnected
 
 #네트워킹 관련 모듈
+
 def getMyIp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -359,9 +369,10 @@ def getMyIp():
     s.close()
     return ip
 
+#네트워킹용 패킷 모듈
 class Packet():
     def __init__(self, _input, _data, _type = PacketType.INVALID):
-        if _input is PacketInOut.IN:
+        if _input is PacketInOut.IN:    #받은 정보를 패킷으로 변환
             initial = PACKET_INITIAL[PacketType.INVALID]
             realData = ""
 
@@ -374,7 +385,7 @@ class Packet():
                 realData = _data[4:]
 
             self.type = PacketType.INVALID
-            for type in PACKET_INITIAL:
+            for type in PACKET_INITIAL: #식별자 찾기
                 if PACKET_INITIAL[type] == initial:
                     self.type = type
                     break
@@ -384,13 +395,14 @@ class Packet():
                 return
             self.data = realData
             self.valid = True
-        elif _input is PacketInOut.OUT:
+        elif _input is PacketInOut.OUT:     #내보낼 정보를 패킷으로 변환
             self.type = _type
             self.data = _data
             self.valid = True
-        else:
+        else:       #이상한 값을 입력했을 때
             self.valid = False
 
+    #이 패킷의 정보를 인코딩하여 반환
     def getPackedData(self):
         if not self.valid:
             return PACKET_INITIAL[PacketType.INVALID]
@@ -399,87 +411,98 @@ class Packet():
 
         return rawData.encode()
 
+    #패킷 전송
     def sendTo(self, address):
-        global room
+        global netSocket
 
-        if room is None:
+        if netSocket is None:
             return
 
         try:
-            room.sendto(self.getPackedData(), address)
+            netSocket.sendto(self.getPackedData(), address)
         except:
             closeRoom()
 
+#방 생성
 def createRoom():
-    global room
+    global netSocket
     global networkState
     global address
 
-    if not room is None or not address is None:
+    if not netSocket is None or not address is None:
         closeRoom()
 
-    room = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    netSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)     #UCP 사용
     networkState = NetworkState.Disconnected
     address = None
 
+#방 제거
 def closeRoom(deep = 1):
-    global room
+    global netSocket
     global networkState
     global address
     global networkThead
 
+    #스텍 오버플로우 방지용도
     if deep > 5:
         return
 
     networkState = NetworkState.Disconnected
 
-    if room is None:
+    if netSocket is None:
         return
 
     if not address is None:
+        #QUIT 패킷 전송
         packet = Packet(PacketInOut.OUT, "", PacketType.QUIT)
         packet.sendTo(address)
         address = None
 
     try:
-        room.close()
+        netSocket.close()
     except:
-        if not room is None:
+        if not netSocket is None:
+            #제대로 안 닫혔으면 닫힐 때까지 계속 실행
             closeRoom(deep + 1)
         return
-    room = None
+    netSocket = None
     networkThead = None
 
+#접속 대기
 def waitEnter():
-    global room
+    global netSocket
     global networkState
     global address
 
-    if room is None:
+    if netSocket is None:
         createRoom()
     try:
-        room.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
+        #소켓 바인딩
+        netSocket.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
     except:
         closeRoom()
         return
     networkState = NetworkState.Connecting
     
     try:
-        (rawData, _address) = room.recvfrom(1024)
+        (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except:
         closeRoom()
         return
     packet = Packet(PacketInOut.IN, data)
     if not packet.valid or not packet.type is PacketType.ACCESS_REQUIRE:
+        #이상한 패킷을 받았으면 취소
         closeRoom()
         return
     if not packet.data == NETWORK_VERSION:
-        packet = Packet(PacketInOut.OUT, NETWORK_VERSION, PacketType.ACCESS_DENY)
+        #게임 버전이 일치하지 않으면 취소
+        packet = Packet(PacketInOut.OUT, "", PacketType.ACCESS_DENY)
         packet.sendTo(_address)
         closeRoom()
         return
 
+    #접속 수락 패킷 전송
     packet = Packet(PacketInOut.OUT, "", PacketType.ACCESS_ACCEPT)
     packet.sendTo(_address)
     address = _address
@@ -487,26 +510,30 @@ def waitEnter():
 
     print("connected")
 
+#방 접속
 def enterRoom(_ip, _port):
-    global room
+    global netSocket
     global networkState
     global address
 
-    if room is None:
+    if netSocket is None:
         createRoom()
     networkState = NetworkState.Connecting
     
+    #접속 요청 패킷 전송
     packet = Packet(PacketInOut.OUT, NETWORK_VERSION, PacketType.ACCESS_REQUIRE)
     packet.sendTo((_ip, _port))
 
     try:
-        (rawData, _address) = room.recvfrom(1024)
+        #서버측 응답 대기
+        (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except:
         closeRoom()
         return
     packet = Packet(PacketInOut.IN, data)
     if not packet.valid or not packet.type is PacketType.ACCESS_ACCEPT:
+        #접속 수락 패킷이 아니면 취소
         closeRoom()
         return
 
@@ -583,6 +610,7 @@ class Block:
         dirY = self.dirY
         y = self.y
         
+        #미리 돌려보기
         dirZ *= -1
         if dirX == dirY:
             dirY *= -1
@@ -592,13 +620,16 @@ class Block:
         y -=  len(state[0]) - len(self.curState[0])
             
         if self.isColideWith(state, self.x, y):
+            #충돌하면 취소
             return
         
+        #결과 적용
         self.curState = self.getState(dirZ, dirX, dirY)
         self.dirZ = dirZ
         self.dirX = dirX
         self.dirY = dirY
         self.y = y
+        #페이크 블럭 반영
         fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
     def turnLeft(self):
@@ -609,6 +640,7 @@ class Block:
         dirY = self.dirY
         y = self.y
         
+        #미리 돌려보기
         dirZ *= -1
         if dirX == dirY:
             dirX *= -1
@@ -618,21 +650,27 @@ class Block:
         y -=  len(state[0]) - len(self.curState[0])
             
         if self.isColideWith(state, self.x, self.y):
+            #충돌하면 취소
             return
             
+        #결과 적용
         self.curState = self.getState(dirZ, dirX, dirY)
         self.dirZ = dirZ
         self.dirX = dirX
         self.dirY = dirY
         self.y = y
+        #페이크 블럭 반영
         fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
     
+    #1칸 떨어지기
     def fall(self):
         if self.isColideWith(self.curState, self.x, self.y + 1):
+            #충돌시 고정
             self.landing()
             
         self.y += 1
     
+    #이동
     def move(self, dx, dy):
         global fakeBlock
 
@@ -641,8 +679,10 @@ class Block:
         
         self.x += dx
         self.y += dy
+        #페이크 블럭 반영
         fakeBlock = FakeBlock(self.curState, self.x, self.y, self.color)
         
+    #블럭 고정
     def landing(self):
         global curBlock
         global gameState
@@ -672,19 +712,20 @@ class Block:
         curBlock = None
         fakeBlock = None
 
-        #라인 클리어 감지
+        #라인 클리어 처리
         lines = []
         for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
             if self.lineCheck(y):
                 lines.append(y)
                 score += SCORE_PER_LINE + COMBO_SCORE * combo
                 combo += 1
+        #콤보 점수 처리
         if len(lines) > 0:
             animations.append(Animation(AnimationType.LineClear, lines))
         else:
             combo = 0
             
-    #라인 클리어 감지
+    #라인 클리어 확인
     def lineCheck(self, y):
         for x in range(0, HORIZONTAL_CELL_COUNT):
             if cells[x][y].state is CellState.Empty:
@@ -756,6 +797,7 @@ class GameManager:
     def __init__(self):
         self.tick = 0
     
+    #게임 시작
     def gameStart(self):
         global gameState
         global appState
@@ -764,6 +806,7 @@ class GameManager:
         gameState = GameState.WaitNewBlock
         appState = AppState.Run
     
+    #게임 리셋
     def gameReset(self):
         global score
         global cells
@@ -785,6 +828,7 @@ class GameManager:
                 tmp.append(Cell())
             cells.append(tmp)
     
+    #게임 종료
     def gameEnd(self):
         global gameState
         global highScore
@@ -793,12 +837,14 @@ class GameManager:
         if score > highScore:
             highScore = score
     
+    #키를 눌렀다가 땔 때
     def keyUp(self, keyCode):
         global TICK_PER_CELL
         
         if keyCode == KEY_FAST_DROP:
             TICK_PER_CELL = DEFAULT_TICK_PER_CELL
     
+    #키를 누르고 있는 동안 일정 틱마다 호출
     def keyPressed(self, keyCode):
         if not appState is AppState.Run or gameState is GameState.GameOver or gameState is GameState.Paused:
             return
@@ -810,6 +856,7 @@ class GameManager:
             if not curBlock is None:
                 curBlock.move(1, 0)
     
+    #키를 눌렀을 때 1회 호출
     def keyDown(self, keyCode):
         global TICK_PER_CELL
         global gameState
@@ -821,6 +868,7 @@ class GameManager:
         if not appState is AppState.Run or gameState is GameState.GameOver:
             return
         
+        #Pause 검사
         if keyCode == KEY_PAUSE:
             if not gameState is GameState.GameOver:
                 if gameState is GameState.Paused:
@@ -833,6 +881,7 @@ class GameManager:
         if  gameState is GameState.Paused:
             return
 
+        #이동 and 회전 검사
         if keyCode == KEY_LEFT:
             if not curBlock is None:
                 curBlock.move(-1, 0)
@@ -847,12 +896,14 @@ class GameManager:
             if not curBlock is None:
                 curBlock.turnRight()
     
+    #틱당 1회 실행됨
     def update(self):
         global gameState
 
         if appState is AppState.Run:
             self.tick += 1
             
+            #GameState별 처리
             if gameState is GameState.WaitNewBlock:
                 if curBlock is None:
                     self.spawnNewBlock()
@@ -861,8 +912,9 @@ class GameManager:
                     curBlock.fall()
             elif gameState is GameState.Animating:
                 if len(animations) == 0:
-                    #애니매이션 완료시 다시 시작
+                    #애니매이션 완료시 이전 상태로 복귀
                     gameState = preAnimaionState
+                #애니매이션 재생
                 for animation in animations:
                     animation.update()
     
@@ -902,11 +954,12 @@ class GameManager:
                     sys.exit()
             elif menuState is MenuState.GameMode:
                 if isCollideIn(pos, SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140):
+                    #게임 플레이 - Sole
                     gamemode = GameMode.Sole
                     self.gameReset()
                     self.gameStart()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
-                    #Create Room
+                    #게임 플레이 - Create Room
                     menuState = MenuState.CreateRoom
                     createRoom()
 
@@ -916,7 +969,7 @@ class GameManager:
                     networkThead = threading.Thread(target=waitEnter, daemon=True)
                     networkThead.start()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 165, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
-                    #Enter Room
+                    #게임 플레이 - Enter Room
                     menuState = MenuState.EnterRoom
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #세팅 - Quit
@@ -978,7 +1031,7 @@ class GameManager:
                         menuState = MenuState.GameMode
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55):
                     if networkState is NetworkState.Disconnected:
-                        #Connect
+                        #방 입장 - Connect
                         createRoom()
 
                         if not networkThead is None:
@@ -991,7 +1044,7 @@ class GameManager:
                         networkThead = threading.Thread(daemon=True, target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
                         networkThead.start()
                     elif networkState is NetworkState.Connecting:
-                        #Cancel
+                        #방 입장 - Cancel
                         closeRoom()
         elif appState is AppState.Run:
             if gameState is GameState.GameOver:
@@ -1018,6 +1071,7 @@ class GameManager:
                     menuState = MenuState.Main
                     appState = AppState.Menu
      
+    #UI 출력
     def drawUI(self):
         pos = pygame.mouse.get_pos()
         if appState is AppState.Menu:
@@ -1030,6 +1084,7 @@ class GameManager:
                 displayInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.GameMode:
+                #게임 모드 설정
                 displayInterectibleTextRect(pos, "Sole", SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140, size = 80, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Create Room", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Enter Room", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 160, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
@@ -1077,9 +1132,11 @@ class GameManager:
 
                 displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
+                #방 생성
                 if not networkState is NetworkState.Connected:
                     displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.EnterRoom:
+                #방 입장
                 if networkState is NetworkState.Disconnected:
                     displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 elif networkState is NetworkState.Connecting:
@@ -1202,6 +1259,8 @@ class GameManager:
 
 #초기화
 manager = GameManager()
+
+#UI Object 생성
 displayObjects["port"] = TextField(SCREEN_WIDTH / 2 + 125, 170, 200, 50, whenNetworkSetting, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
 useMinMax= True, minValue=10000, maxValue=65535)
 displayObjects["ip1"] = TextField(SCREEN_WIDTH / 2 -220, 130, 80, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=3, content="127",
@@ -1214,13 +1273,8 @@ displayObjects["ip4"] = TextField(SCREEN_WIDTH / 2 + 65, 130, 80, 40, whenIpInpu
 useMinMax= True, minValue=0, maxValue=255)
 displayObjects["ipPort"] = TextField(SCREEN_WIDTH / 2 + 200, 130, 150, 40, whenIpInputing, font="hancommalangmalang", color=(50, 50, 50), maxLength=5, content=str(DEFAULT_PORT),
 useMinMax= True, minValue=10000, maxValue=65535)
-for x in range(0, HORIZONTAL_CELL_COUNT):
-    tmp = []
-    for y in range(0, VERTICAL_CELL_COUNT):
-        tmp.append(Cell())
-    cells.append(tmp)
 
-#메인루프
+#메인 루프
 while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -1229,31 +1283,38 @@ while True:
 
         #입력 처리
         if event.type == pygame.MOUSEBUTTONUP:
+            #마우스 클릭
             manager.mouseUp()
             for ui in displayObjects:
                 displayObjects[ui].mouseDown(pygame.mouse.get_pos())
         if event.type == pygame.KEYDOWN:
+            #키보드 입력 처리 - 1
             for ui in displayObjects:
                 displayObjects[ui].keyDown(event.key)
+
             if not listener is None:
+                #키 설정 처리
                 if event.key in ALL_CHECKING_KEYS:
                     continue
                 listener(event.key)
                 ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
     
-    #키 입력 처리
+    #키보드 입력 처리 - 2
     curPressedKey = pygame.key.get_pressed()
     for keyCode in ALL_CHECKING_KEYS:
         if not curPressedKey[keyCode] and keyCode in pressedKey:
+            #키 땠을 때
             manager.keyUp(keyCode)
             pressedKey.pop(keyCode)
         if curPressedKey[keyCode]:
             if not keyCode in pressedKey:
+                #키 눌렀을 때
                 manager.keyDown(keyCode)
                 pressedKey[keyCode] = manager.tick
             elif (pressedKey[keyCode] >= KEY_INPUT_DELAY 
                   and manager.tick - pressedKey[keyCode] >= KEY_INPUT_DELAY
                   and (manager.tick - pressedKey[keyCode] - KEY_INPUT_DELAY) % KEY_INPUT_REPEAT == 0):
+                  #키 누르고 있을 때
                 manager.keyPressed(keyCode)
     
     #메인 로직 처리
