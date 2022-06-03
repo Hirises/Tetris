@@ -147,7 +147,6 @@ PACKET_INITIAL[PacketType.ACCESS_REQUIRE] = "ACRQ"
 PACKET_INITIAL[PacketType.ACCESS_ACCEPT] = "ACOK"
 PACKET_INITIAL[PacketType.ACCESS_DENY] = "ACNO"
 PACKET_INITIAL[PacketType.QUIT] = "QUIT"
-
 #초기화
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGTH))
@@ -353,7 +352,6 @@ def whenIpInputing():
     return menuState is MenuState.EnterRoom and networkState is NetworkState.Disconnected
 
 #네트워킹 관련 모듈
-
 def getMyIp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -921,6 +919,7 @@ class GameManager:
                     #Enter Room
                     menuState = MenuState.EnterRoom
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    #세팅 - Quit
                     menuState = MenuState.Main
             elif menuState is MenuState.Setting:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, 170, 200, 40):
