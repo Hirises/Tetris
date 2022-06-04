@@ -173,11 +173,17 @@ address = None  #주소
 networkState = NetworkState.Disconnected    #현재 상태
 networkThead = None        #네트워킹 담당 쓰레드
 packetPool = None           #패킷 풀
+returnedPacketPool = None   #반환된 패킷 풀
 packetPoolLock = threading.Lock()   #패킷 풀 락
 networkGameValue = IngameValue()
 networkGameValue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_RIGHT
 networkGameValue.remote = True
-
+class SynchronizeState(Enum):
+    WaitBoth = 0
+    WaitReceived = 1
+    WaitSend = 2
+    Finish = 3
+synchronized = SynchronizeState.WaitBoth
 
 
 
@@ -438,7 +444,6 @@ class Packet():
                 if len(splitedAtomicData) != 2:
                     continue
                 decodedData[splitedAtomicData[0]] = splitedAtomicData[1]
-            print(decodedData)
 
             self.data = decodedData
             self.valid = True
@@ -461,17 +466,14 @@ class Packet():
             if not self.valid:
                 output.append(0)
                 result = False
-                print("packet is vaild")
                 continue
             if self.data[key] is None:
                 output.append(0)
                 result = False
-                print("value is None")
                 continue
             if not isinstance(self.data[key], str):
                 output.append(0)
                 result = False
-                print("value is not a string")
                 continue
             
             try:
@@ -479,10 +481,7 @@ class Packet():
             except:
                 output.append(0)
                 result = False
-                print("value is not an int")
         output.append(result)
-        print(output)
-
         return tuple(output)
 
     #이 패킷의 정보를 인코딩하여 반환
@@ -515,7 +514,6 @@ class Packet():
         try:
             netSocket.sendto(self.getPackedData(), _address)
         except:
-            print("fail to send packet")
             return
 
 #방 생성
@@ -538,6 +536,7 @@ def closeRoom(deep = 1):
     global address
     global networkThead
     global packetPool
+    global returnedPacketPool
 
     #스텍 오버플로우 방지용도
     if deep > 5:
@@ -557,12 +556,12 @@ def closeRoom(deep = 1):
     try:
         netSocket.close()
     except:
-        print("fail to close packet")
         if not netSocket is None:
             #제대로 안 닫혔으면 닫힐 때까지 계속 실행
             closeRoom(deep + 1)
         return
     packetPool = None
+    returnedPacketPool = None
     netSocket = None
     networkThead = None
 
@@ -572,6 +571,7 @@ def waitEnter():
     global networkState
     global address
     global packetPool
+    global returnedPacketPool
     global gamemode
 
     if netSocket is None:
@@ -580,7 +580,7 @@ def waitEnter():
         #소켓 바인딩
         netSocket.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
     except:
-        print("fail to bind socket")
+        print("except 102")
         closeRoom()
         return
     
@@ -588,7 +588,7 @@ def waitEnter():
         (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except:
-        print("fail to receive packet for connecting at server")
+        print("except 103")
         closeRoom()
         return
     networkState = NetworkState.Connecting
@@ -612,6 +612,7 @@ def waitEnter():
     address = _address
     networkState = NetworkState.Connected
     packetPool = SimpleQueue()
+    returnedPacketPool = SimpleQueue()
     gamemode = GameMode.Duel
 
     t = threading.Thread(target=runPacketListener, daemon=True)
@@ -625,6 +626,7 @@ def enterRoom(_ip, _port):
     global networkState
     global address
     global packetPool
+    global returnedPacketPool
     global gamemode
 
     if netSocket is None:
@@ -640,19 +642,19 @@ def enterRoom(_ip, _port):
         (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except:
-        print("fail to receive packet for connecting at client")
+        print("except 101")
         closeRoom()
         return
     packet = Packet(PacketInOut.IN, data)
     if not packet.valid or not packet.type is PacketType.ACCESS_ACCEPT:
         #접속 수락 패킷이 아니면 취소
-        print("fail to connect because of incorrect packet type")
         closeRoom()
         return
 
     address = _address
     networkState = NetworkState.Connected
     packetPool = SimpleQueue()
+    returnedPacketPool = SimpleQueue()
     gamemode = GameMode.Duel
 
     t = threading.Thread(target=runPacketListener, daemon=True)
@@ -665,7 +667,6 @@ def runPacketListener():
     while(True):
         #접속 종료 처리
         if netSocket is None:
-            print("disconnect")
             closeRoom()
             break
 
@@ -674,14 +675,12 @@ def runPacketListener():
             (rawData, _address) = netSocket.recvfrom(1024)
             data = rawData.decode()
         except:
-            print("fail to receive packet")
+            print("except 201")
             #접속 종료 처리
             if netSocket is None:
-                print("disconnect")
                 closeRoom()
                 break
             continue
-        print("received")
         packet = Packet(PacketInOut.IN, data)
         if not packet.valid or packet.type is PacketType.INVALID:
             #이상한 패킷이면 취소
@@ -689,7 +688,7 @@ def runPacketListener():
         
         #큐에 추가
         packetPoolLock.acquire()
-        print("inqueue")
+        print(packet.type, packet.data)
         packetPool.put(packet)
         packetPoolLock.release()
 
@@ -698,31 +697,45 @@ def getNextPacket():
     if packetPool is None:
         return Packet(PacketInOut.OUT, "", PacketType.INVALID)
 
-    packetPoolLock.acquire()
     if packetPool.empty():
         return Packet(PacketInOut.OUT, "", PacketType.INVALID)
     packet = packetPool.get()
-    packetPoolLock.release()
+
+    return packet
+
+#다음 반환된 패킷 가져오기
+def getNextReturnedPacket():
+    if returnedPacketPool is None:
+        return Packet(PacketInOut.OUT, "", PacketType.INVALID)
+
+    if returnedPacketPool.empty():
+        return Packet(PacketInOut.OUT, "", PacketType.INVALID)
+    packet = returnedPacketPool.get()
 
     return packet
 
 #패킷 반환
 def returnPacket(packet):
-    if packetPool is None:
+    if returnedPacketPool is None:
         return
 
-    packetPoolLock.acquire()
-    packetPool.put(packet)
-    packetPoolLock.release()
+    returnedPacketPool.put(packet)
 
 #다음 패킷 존재 여부
 def hasNextPacket():
     if packetPool is None:
         return False
 
-    packetPoolLock.acquire()
     isEmpty = packetPool.empty()
-    packetPoolLock.release()
+
+    return not isEmpty
+
+#다음 반환된 패킷 존재 여부
+def hasNextReturnedPacket():
+    if returnedPacketPool is None:
+        return False
+
+    isEmpty = returnedPacketPool.empty()
 
     return not isEmpty
 
@@ -979,7 +992,6 @@ class GameManager:
     def __init__(self, gamevalue):
         self.tick = 0
         self.gamevalue = gamevalue
-        self.synchronized = False
 
     #게임 시작
     def gameStart(self):
@@ -992,6 +1004,8 @@ class GameManager:
     
     #게임 리셋
     def gameReset(self):
+        global synchronized
+
         self.gamevalue.lastX = 0
         self.gamevalue.gameState = GameState.WaitNewBlock
         self.tick = 0
@@ -1002,7 +1016,8 @@ class GameManager:
         self.gamevalue.blockID = 0
         self.gamevalue.RANDOM_SEED = self.gamevalue.random.randrange(0, sys.maxsize)
         self.gamevalue.random.seed(self.gamevalue.RANDOM_SEED)
-        self.synchronized = False
+        if not self.gamevalue.remote:
+            synchronized = SynchronizeState.WaitBoth
 
         if gamemode is GameMode.Sole:
             self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_MID
@@ -1102,12 +1117,13 @@ class GameManager:
     #틱당 1회 실행됨
     def update(self):
         if appState is AppState.Run:
-            if gamemode is GameMode.Duel and not self.synchronized:
+            if not self.gamevalue.remote and gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitSend or synchronized is SynchronizeState.WaitBoth):
                 packet = Packet(PacketInOut.OUT, {"seed": localGameValue.RANDOM_SEED}, PacketType.SYNCHRONIZE_GAME_SETTING)
                 packet.sendTo(address)
+            if gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitReceived or synchronized is SynchronizeState.WaitBoth):
                 return
-
             self.tick += 1
+            print("run")
 
             if self.tick == 1 and gamemode is GameMode.Duel:
                 self.synchronizedFallingSpeed()
@@ -1137,7 +1153,7 @@ class GameManager:
     
     #패킷 처리
     def processPacket(self, packet):
-        print("dequeue")
+        global synchronized
 
         if packet.type is PacketType.INVALID:
             #오류 패킷
@@ -1147,7 +1163,7 @@ class GameManager:
             if appState == AppState.Run:
                 manager.gameEnd()
             closeRoom()
-        elif packet.type is PacketType.BLOCK_MONE and self.gamevalue.remote:
+        elif packet.type is PacketType.BLOCK_MONE:
             #블럭 이동
             (remoteTick, id, x, y, dirX, dirY, dirZ, result) = packet.getIntValues("tick", "id", "x", "y", "dirX", "dirY", "dirZ")
 
@@ -1166,7 +1182,7 @@ class GameManager:
             self.gamevalue.curBlock.dirZ = dirZ
             self.gamevalue.curBlock.curState = self.gamevalue.curBlock.getState(dirZ, dirX, dirY)
             self.gamevalue.curBlock.applyFakeBlock()
-        elif packet.type is PacketType.CHANGE_TICK_PRE_CELL and self.gamevalue.remote:
+        elif packet.type is PacketType.CHANGE_TICK_PRE_CELL:
             #블럭 하락 속도 동기화
             (remoteTick, speed, result) = packet.getIntValues("tick", "speed")
 
@@ -1178,18 +1194,31 @@ class GameManager:
 
             self.gamevalue.TICK_PER_CELL = speed
         elif packet.type is PacketType.SYNCHRONIZE_GAME_SETTING:
+            if synchronized is SynchronizeState.Finish or synchronized is SynchronizeState.WaitSend:
+                return
+
             #게임 설정 동기화
             (seed, result) = packet.getIntValues("seed")
 
             if not result:
                 return
             networkGameValue.RANDOM_SEED = seed
+            networkGameValue.random.seed(seed)
+            if synchronized is SynchronizeState.WaitBoth:
+                synchronized = SynchronizeState.WaitSend
+            elif synchronized is SynchronizeState.WaitReceived:
+                synchronized = SynchronizeState.Finish
+            print(synchronized)
 
             packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
             packetOut.sendTo()
         elif packet.type is PacketType.FINISH_SYNCHRONIZING:
             #게임 설정 동기화 완료
-            self.synchronized = True
+            if synchronized is SynchronizeState.WaitBoth:
+                synchronized = SynchronizeState.WaitReceived
+            elif synchronized is SynchronizeState.WaitSend:
+                synchronized = SynchronizeState.Finish
+            print(synchronized)
 
     #다음 블럭 생성
     def spawnNewBlock(self):
@@ -1610,10 +1639,16 @@ while True:
     
     #패킷 처리
     if gamemode is GameMode.Duel:
+        packetPoolLock.acquire()
+        while hasNextReturnedPacket():
+            packet = getNextReturnedPacket()
+            #manager.processPacket(packet)
+            networkManager.processPacket(packet)
         while hasNextPacket():
             packet = getNextPacket()
-            manager.processPacket(packet)
+            #manager.processPacket(packet)
             networkManager.processPacket(packet)
+        packetPoolLock.release()
 
     #메인 로직 처리
     if gamemode is GameMode.Duel:
