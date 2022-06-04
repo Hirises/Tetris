@@ -197,8 +197,8 @@ synchronized = SynchronizeState.WaitBoth
 
 #선정의 메소드
 
-def randomBit():    #랜덤으로 -1 또는 1을 반환
-    if random.randint(0, 1) == 0:
+def randomBit(ran):    #랜덤으로 -1 또는 1을 반환
+    if ran.randint(0, 1) == 0:
         return 1
     else:
         return -1
@@ -1123,7 +1123,6 @@ class GameManager:
             if gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitReceived or synchronized is SynchronizeState.WaitBoth):
                 return
             self.tick += 1
-            print("run")
 
             if self.tick == 1 and gamemode is GameMode.Duel:
                 self.synchronizedFallingSpeed()
@@ -1224,7 +1223,7 @@ class GameManager:
     def spawnNewBlock(self):
         self.gamevalue.curBlock = Block(ALL_BLOCK_STATES[self.gamevalue.random.randint(0, len(ALL_BLOCK_STATES) - 1)], self.gamevalue, self.gamevalue.blockID,
                          color = ALL_BLOCK_COLORS[self.gamevalue.random.randint(0, len(ALL_BLOCK_COLORS) - 1)],
-                         dirZ = randomBit(), dirX = randomBit(), dirY = randomBit(), x = self.gamevalue.lastX)
+                         dirZ = randomBit(self.gamevalue.random), dirX = randomBit(self.gamevalue.random), dirY = randomBit(self.gamevalue.random), x = self.gamevalue.lastX)
         self.gamevalue.blockID += 1
         self.gamevalue.gameState = GameState.Drop
 
