@@ -173,7 +173,7 @@ address = None  #주소
 networkState = NetworkState.Disconnected    #현재 상태
 networkThead = None        #네트워킹 담당 쓰레드
 packetPool = None           #패킷 풀
-returnedPacketPool = None   #반환된 패킷 풀
+returnedPackets = None   #반환된 패킷
 packetPoolLock = threading.Lock()   #패킷 풀 락
 networkGameValue = IngameValue()
 networkGameValue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_RIGHT
@@ -324,14 +324,15 @@ def isCollideIn(pos, x, y, dx, dy):
     return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
 
 class Animation:
-    def __init__(self, type, var):
+    def __init__(self, type, var, gamevalue):
         self.type = type
         self.tick = 0
         self.var = var
+        self.gamevalue = gamevalue
 
-        if not localGameValue.gameState is GameState.Animating:
-            localGameValue.preAnimaionState = localGameValue.gameState
-            localGameValue.gameState = GameState.Animating
+        if not self.gamevalue.gameState is GameState.Animating:
+            self.gamevalue.preAnimaionState = self.gamevalue.gameState
+            self.gamevalue.gameState = GameState.Animating
 
     def update(self):
         self.tick += 1
@@ -339,22 +340,21 @@ class Animation:
             if self.tick == 1:
                 for x in range(0, HORIZONTAL_CELL_COUNT):
                     for y in self.var:
-                        localGameValue.cells[x][y].changeState(
+                        self.gamevalue.cells[x][y].changeState(
                             CellState.Occupied, (255, 255, 255))
             elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
                 for x in range(0, HORIZONTAL_CELL_COUNT):
                     for y in self.var:
-                        localGameValue.cells[x][y].changeState(CellState.Empty, (255, 0, 0))
+                        self.gamevalue.cells[x][y].changeState(CellState.Empty, (255, 0, 0))
                 for locY in sorted(self.var):
                     for y in range(locY, 1, -1):
                         for x in range(0, HORIZONTAL_CELL_COUNT):
-                            localGameValue.cells[x][y].changeState(
-                                localGameValue.cells[x][y - 1].state, localGameValue.cells[x][y - 1].color)
-                localGameValue.animations.remove(self)
+                            self.gamevalue.cells[x][y].changeState(
+                                self.gamevalue.cells[x][y - 1].state, self.gamevalue.cells[x][y - 1].color)
+                self.gamevalue.animations.remove(self)
             elif self.tick >= 3:
                 for y in self.var:
-                    localGameValue.cells[self.tick -
-                          3][y].changeState(CellState.Empty, (255, 255, 255))
+                    self.gamevalue.cells[self.tick - 3][y].changeState(CellState.Empty, (255, 255, 255))
 
 #람다 대용
 def setLeftMoveKey(keyCode):
@@ -536,7 +536,7 @@ def closeRoom(deep = 1):
     global address
     global networkThead
     global packetPool
-    global returnedPacketPool
+    global returnedPackets
 
     #스텍 오버플로우 방지용도
     if deep > 5:
@@ -561,7 +561,7 @@ def closeRoom(deep = 1):
             closeRoom(deep + 1)
         return
     packetPool = None
-    returnedPacketPool = None
+    returnedPackets = None
     netSocket = None
     networkThead = None
 
@@ -571,7 +571,7 @@ def waitEnter():
     global networkState
     global address
     global packetPool
-    global returnedPacketPool
+    global returnedPackets
     global gamemode
 
     if netSocket is None:
@@ -612,7 +612,7 @@ def waitEnter():
     address = _address
     networkState = NetworkState.Connected
     packetPool = SimpleQueue()
-    returnedPacketPool = SimpleQueue()
+    returnedPackets = []
     gamemode = GameMode.Duel
 
     t = threading.Thread(target=runPacketListener, daemon=True)
@@ -626,7 +626,7 @@ def enterRoom(_ip, _port):
     global networkState
     global address
     global packetPool
-    global returnedPacketPool
+    global returnedPackets
     global gamemode
 
     if netSocket is None:
@@ -654,7 +654,7 @@ def enterRoom(_ip, _port):
     address = _address
     networkState = NetworkState.Connected
     packetPool = SimpleQueue()
-    returnedPacketPool = SimpleQueue()
+    returnedPackets = []
     gamemode = GameMode.Duel
 
     t = threading.Thread(target=runPacketListener, daemon=True)
@@ -703,23 +703,18 @@ def getNextPacket():
 
     return packet
 
-#다음 반환된 패킷 가져오기
-def getNextReturnedPacket():
-    if returnedPacketPool is None:
-        return Packet(PacketInOut.OUT, "", PacketType.INVALID)
 
-    if returnedPacketPool.empty():
-        return Packet(PacketInOut.OUT, "", PacketType.INVALID)
-    packet = returnedPacketPool.get()
-
-    return packet
+#반환된 패킷 넘기기
+def passOverReturedPackets():
+    for packet in returnedPackets:
+        packetPool.put(packet)
 
 #패킷 반환
 def returnPacket(packet):
-    if returnedPacketPool is None:
+    if returnedPackets is None:
         return
 
-    returnedPacketPool.put(packet)
+    returnedPackets.append(packet)
 
 #다음 패킷 존재 여부
 def hasNextPacket():
@@ -727,15 +722,6 @@ def hasNextPacket():
         return False
 
     isEmpty = packetPool.empty()
-
-    return not isEmpty
-
-#다음 반환된 패킷 존재 여부
-def hasNextReturnedPacket():
-    if returnedPacketPool is None:
-        return False
-
-    isEmpty = returnedPacketPool.empty()
 
     return not isEmpty
 
@@ -895,7 +881,7 @@ class Block:
                     self.gamevalue.cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
         
         #게임 종료 감지
-        if self.y - len(self.curState[0]) + 1 < 0:
+        if not self.gamevalue.remote and self.y - len(self.curState[0]) + 1 < 0:
             self.y -= 1
             manager.gameEnd()
             return
@@ -915,7 +901,7 @@ class Block:
                 self.gamevalue.combo += 1
         #콤보 점수 처리
         if len(lines) > 0:
-            self.gamevalue.animations.append(Animation(AnimationType.LineClear, lines))
+            self.gamevalue.animations.append(Animation(AnimationType.LineClear, lines, self.gamevalue))
         else:
             self.gamevalue.combo = 0
             
@@ -1168,7 +1154,7 @@ class GameManager:
 
             if not result:
                 return
-            if self.gamevalue.curBlock is not None and self.gamevalue.curBlock.id != id:
+            if self.gamevalue.curBlock is None or self.gamevalue.curBlock.id != id:
                 return
             if self.tick < remoteTick:
                 returnPacket(packet)
@@ -1639,14 +1625,10 @@ while True:
     #패킷 처리
     if gamemode is GameMode.Duel:
         packetPoolLock.acquire()
-        while hasNextReturnedPacket():
-            packet = getNextReturnedPacket()
-            #manager.processPacket(packet)
-            networkManager.processPacket(packet)
         while hasNextPacket():
             packet = getNextPacket()
-            #manager.processPacket(packet)
             networkManager.processPacket(packet)
+        passOverReturedPackets()
         packetPoolLock.release()
 
     #메인 로직 처리
