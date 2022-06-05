@@ -529,7 +529,8 @@ class Packet():
         global netSocket
 
         #패킷 복구 확인용 패킷 씹기
-        if FLAG_RANDOM_IGNORE_PACKET and not networkState is NetworkState.Connected and random.randint(0,2) == 0:
+        if FLAG_RANDOM_IGNORE_PACKET and random.randint(0,2) == 0:
+            debugLog(">//", self.type, self.data)
             return
 
         if netSocket is None or not self.valid:
@@ -1821,80 +1822,101 @@ useMinMax= True, minValue=10000, maxValue=65535)
 
 #메인 루프
 while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
-            sys.exit()
+    try:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
 
-        #입력 처리
-        if event.type == pygame.MOUSEBUTTONUP:
-            #마우스 클릭
-            manager.mouseUp()
-            for ui in displayObjects:
-                displayObjects[ui].mouseDown(pygame.mouse.get_pos())
-        if event.type == pygame.KEYDOWN:
-            #키보드 입력 처리 - 1
-            for ui in displayObjects:
-                displayObjects[ui].keyDown(event.key)
+            #입력 처리
+            if event.type == pygame.MOUSEBUTTONUP:
+                #마우스 클릭
+                manager.mouseUp()
+                for ui in displayObjects:
+                    displayObjects[ui].mouseDown(pygame.mouse.get_pos())
+            if event.type == pygame.KEYDOWN:
+                #키보드 입력 처리 - 1
+                for ui in displayObjects:
+                    displayObjects[ui].keyDown(event.key)
 
-            if not listener is None:
-                #키 설정 처리
-                if event.key in ALL_CHECKING_KEYS:
-                    continue
-                listener(event.key)
-                ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
-    
-    #키보드 입력 처리 - 2
-    curPressedKey = pygame.key.get_pressed()
-    for keyCode in ALL_CHECKING_KEYS:
-        if not curPressedKey[keyCode] and keyCode in pressedKey:
-            #키 땠을 때
-            manager.keyUp(keyCode)
-            pressedKey.pop(keyCode)
-        if curPressedKey[keyCode]:
-            if not keyCode in pressedKey:
-                #키 눌렀을 때
-                manager.keyDown(keyCode)
-                pressedKey[keyCode] = manager.tick
-            elif (pressedKey[keyCode] >= KEY_INPUT_DELAY 
-                  and manager.tick - pressedKey[keyCode] >= KEY_INPUT_DELAY
-                  and (manager.tick - pressedKey[keyCode] - KEY_INPUT_DELAY) % KEY_INPUT_REPEAT == 0):
-                  #키 누르고 있을 때
-                manager.keyPressed(keyCode)
-    
-    #패킷 처리
-    if gamemode is GameMode.Network and networkState is NetworkState.Connected:
-        packet = None
-        while True:
+                if not listener is None:
+                    #키 설정 처리
+                    if event.key in ALL_CHECKING_KEYS:
+                        continue
+                    listener(event.key)
+                    ALL_CHECKING_KEYS = [KEY_RIGHT, KEY_LEFT, KEY_TURN_RIGHT, KEY_TURN_LEFT, KEY_FAST_DROP, KEY_PAUSE]
+        
+        #키보드 입력 처리 - 2
+        curPressedKey = pygame.key.get_pressed()
+        for keyCode in ALL_CHECKING_KEYS:
+            if not curPressedKey[keyCode] and keyCode in pressedKey:
+                #키 땠을 때
+                manager.keyUp(keyCode)
+                pressedKey.pop(keyCode)
+            if curPressedKey[keyCode]:
+                if not keyCode in pressedKey:
+                    #키 눌렀을 때
+                    manager.keyDown(keyCode)
+                    pressedKey[keyCode] = manager.tick
+                elif (pressedKey[keyCode] >= KEY_INPUT_DELAY 
+                    and manager.tick - pressedKey[keyCode] >= KEY_INPUT_DELAY
+                    and (manager.tick - pressedKey[keyCode] - KEY_INPUT_DELAY) % KEY_INPUT_REPEAT == 0):
+                    #키 누르고 있을 때
+                    manager.keyPressed(keyCode)
+        
+        #패킷 처리
+        if gamemode is GameMode.Network and networkState is NetworkState.Connected:
+            packet = None
+            while True:
+                try:
+                    packetPoolLock.acquire()
+                    if not hasNextPacket():
+                        break
+                    packet = getNextPacket()
+                finally:
+                    packetPoolLock.release()
+                if packet is not None:
+                    networkManager.processPacket(packet)
             try:
                 packetPoolLock.acquire()
-                if not hasNextPacket():
-                    break
-                packet = getNextPacket()
+                passOverReturedPackets()
             finally:
                 packetPoolLock.release()
-            if packet is not None:
-                networkManager.processPacket(packet)
-        try:
-            packetPoolLock.acquire()
-            passOverReturedPackets()
-        finally:
-            packetPoolLock.release()
 
 
-    #메인 로직 처리
-    if gamemode is GameMode.Network:
-        networkManager.update()
-    manager.update()
-    
-    #화면 업데이트
-    screen.fill(SCREEN_COLOR)
-    if gamemode is GameMode.Network:
-        networkManager.drawScreen()
-    manager.drawScreen()
-    manager.drawUI()
-    for ui in displayObjects:
-        displayObjects[ui].draw()
-    pygame.display.update()
+        #메인 로직 처리
+        if gamemode is GameMode.Network:
+            networkManager.update()
+        manager.update()
+        
+        #화면 업데이트
+        screen.fill(SCREEN_COLOR)
+        if gamemode is GameMode.Network:
+            networkManager.drawScreen()
+        manager.drawScreen()
+        manager.drawUI()
+        for ui in displayObjects:
+            displayObjects[ui].draw()
+        pygame.display.update()
 
-    clock.tick(TPS)
+        clock.tick(TPS)
+    except Exception as e:
+        debugLog(e.type, e)
+        if networkState is None:
+            networkState = NetworkState.Disconnected
+            closeRoom()
+        elif networkState is NetworkState.Connected:
+            closeRoom()
+        if appState is None:
+            manager.gameEnd(True)
+            manager.gameReset()
+            appstate = AppState.Menu
+            menuState = MenuState.Main
+        elif appState is AppState.Run:
+            manager.gameEnd(True)
+            manager.gameReset()
+            appstate = AppState.Menu
+            menuState = MenuState.Main
+        else:
+            appstate = AppState.Menu
+            menuState = MenuState.Main
