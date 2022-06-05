@@ -115,7 +115,7 @@ class PacketType(Enum):
     RESTART = 7         #다시 시작
     CHANGE_TICK_PRE_CELL = 8    #블럭 떨어지는 속도 변경
     SYNCHRONIZE_GAME_SETTING = 9    #게임 설정 동기화
-    FINISH_SYNCHRONIZING = 10       #게임 설정 동기화 완료
+    FINISH_SYNCHRONIZING = 10       #동기화 완료
 PACKET_INITIAL = {}
 PACKET_INITIAL[PacketType.INVALID] = "INVL"
 PACKET_INITIAL[PacketType.ACCESS_REQUIRE] = "ACRQ"
@@ -185,6 +185,8 @@ class SynchronizeState(Enum):
     WaitReceived = 1
     WaitSend = 2
     Finish = 3
+    WaitGameOver = 4
+    FinishGameOver = 5
 synchronized = SynchronizeState.WaitBoth
 
 
@@ -553,7 +555,7 @@ def closeRoom(deep = 1):
         return
 
     if gamemode is GameMode.Duel and appState is AppState.Run:
-        manager.gameEnd()
+        manager.gameEnd(True)
         appState = AppState.Menu
 
     networkState = NetworkState.Disconnected
@@ -832,8 +834,11 @@ class Block:
             self.x = HORIZONTAL_CELL_COUNT - len(self.curState)
             
         #게임 종료 감지
-        if not self.gamevalue.remote and self.isColideWith(self.curState, self.x, self.y):
-            manager.gameEnd()
+        if self.isColideWith(self.curState, self.x, self.y):
+            if self.gamevalue.remote:
+                self.gamevalue.curBlock = None
+            else:
+                manager.gameEnd(False)
             return
 
         #떨어질 위치 미리보기 생성
@@ -882,7 +887,7 @@ class Block:
         self.dirY = dirY
         self.y = y
         self.applyFakeBlock()
-        if gamemode is GameMode.Duel:
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             self.synchronizePosition()
 
     def turnLeft(self):
@@ -911,7 +916,7 @@ class Block:
         self.dirY = dirY
         self.y = y
         self.applyFakeBlock()
-        if gamemode is GameMode.Duel:
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             self.synchronizePosition()
     
     def applyFakeBlock(self):
@@ -934,12 +939,12 @@ class Block:
         self.x += dx
         self.y += dy
         self.applyFakeBlock()
-        if gamemode is GameMode.Duel:
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             self.synchronizePosition()
 
     #위치 동기화
     def synchronizePosition(self):
-        if gamemode is GameMode.Duel:
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             packet = Packet(PacketInOut.OUT, {"tick": self.gamevalue.manager.tick, "id": self.id, "x": self.x, "y": self.y, "dirX": self.dirX, "dirY": self.dirY, "dirZ": self.dirZ}, PacketType.BLOCK_MONE)
             packet.sendTo()
         
@@ -963,7 +968,7 @@ class Block:
         #게임 종료 감지
         if not self.gamevalue.remote and self.y - len(self.curState[0]) + 1 < 0:
             self.y -= 1
-            manager.gameEnd()
+            manager.gameEnd(False)
             return
         
         #다음 블럭 요청
@@ -989,13 +994,12 @@ class Block:
         else:
             self.gamevalue.combo = 0
         
-        if gamemode is GameMode.Duel:
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             self.synchronizeCells()
 
     #셀 배치 동기화        
     def synchronizeCells(self):
-        if gamemode is GameMode.Duel:
-
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             encodedCells = ""
             for x in range(0, HORIZONTAL_CELL_COUNT):
                 for y in range(0, VERTICAL_CELL_COUNT):
@@ -1124,21 +1128,28 @@ class GameManager:
                 self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_LEFT
     
     #게임 종료
-    def gameEnd(self):
+    def gameEnd(self, force = False):
         global highScore
+        global synchronized
 
-        self.gamevalue.gameState = GameState.GameOver
+        print("game end")
+
+        if not force and gamemode is GameMode.Duel and not synchronized is SynchronizeState.FinishGameOver and not synchronized is SynchronizeState.WaitGameOver:
+            print("send packet")
+            packet = Packet(PacketInOut.OUT, {"tick": self.tick}, PacketType.GAMEOVER)
+            packet.sendTo()
+            synchronized = SynchronizeState.WaitGameOver
+            return
+
+        localGameValue.gameState = GameState.GameOver
+        networkGameValue.gameState = GameState.GameOver
         if not self.gamevalue.remote:
             if self.gamevalue.score > highScore:
                 highScore = self.gamevalue.score
-        
-        if gamemode == GameMode.Duel:
-            packet = Packet(PacketInOut.OUT, {"tick", self.tick}, PacketType.GAMEOVER)
-            packet.sendTo()
     
     #블럭 하락 속도 동기화
     def synchronizedFallingSpeed(self):
-        if gamemode is GameMode.Duel:
+        if gamemode is GameMode.Duel and not self.gamevalue.remote:
             packet = Packet(PacketInOut.OUT, {"tick": self.tick, "speed": self.gamevalue.TICK_PER_CELL}, PacketType.CHANGE_TICK_PRE_CELL)
             packet.sendTo()
 
@@ -1149,7 +1160,7 @@ class GameManager:
 
         if keyCode == KEY_FAST_DROP:
             self.gamevalue.TICK_PER_CELL = DEFAULT_TICK_PER_CELL
-            if gamemode is GameMode.Duel and networkState.Connected and appState.Run:
+            if gamemode is GameMode.Duel and networkState.Connected and appState.Run and not self.gamevalue.remote:
                 self.synchronizedFallingSpeed()
     
     #키를 누르고 있는 동안 일정 틱마다 호출
@@ -1174,7 +1185,7 @@ class GameManager:
         
         if keyCode == KEY_FAST_DROP:
             self.gamevalue.TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
-            if gamemode is GameMode.Duel and networkState.Connected and appState.Run:
+            if gamemode is GameMode.Duel and networkState.Connected and appState.Run and not self.gamevalue.remote:
                 self.synchronizedFallingSpeed()
         
         if not appState is AppState.Run or self.gamevalue.gameState is GameState.GameOver:
@@ -1211,15 +1222,20 @@ class GameManager:
     #틱당 1회 실행됨
     def update(self):
         if appState is AppState.Run:
+            if self.gamevalue.remote and localGameValue.gameState is GameState.GameOver and gamemode is GameMode.Duel and synchronized is SynchronizeState.WaitGameOver:
+                packet = Packet(PacketInOut.OUT, {"tick", self.tick}, PacketType.GAMEOVER)
+                packet.sendTo()
+
             if self.gamevalue.remote and gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitSend or synchronized is SynchronizeState.WaitBoth):
                 print(synchronized, self.gamevalue.remote)
                 packet = Packet(PacketInOut.OUT, {"seed": localGameValue.RANDOM_SEED}, PacketType.SYNCHRONIZE_GAME_SETTING)
                 packet.sendTo(address)
+                return
             if gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitReceived or synchronized is SynchronizeState.WaitBoth):
                 return
             self.tick += 1
 
-            if self.tick == 1 and gamemode is GameMode.Duel:
+            if self.tick % TPS == 0 and gamemode is GameMode.Duel and not self.gamevalue.remote and not self.gamevalue.gameState is GameState.GameOver:
                 self.synchronizedFallingSpeed()
             
             state = self.gamevalue.gameState
@@ -1252,7 +1268,7 @@ class GameManager:
         elif packet.type is PacketType.QUIT:
             #접속 해제 패킷
             if appState == AppState.Run:
-                manager.gameEnd()
+                manager.gameEnd(True)
             closeRoom()
         elif packet.type is PacketType.BLOCK_MONE:
             #블럭 이동
@@ -1343,14 +1359,17 @@ class GameManager:
             packetOut.sendTo()
         elif packet.type is PacketType.FINISH_SYNCHRONIZING:
             #게임 설정 동기화 완료
-            if synchronized is SynchronizeState.WaitBoth:
+            if synchronized is SynchronizeState.WaitGameOver:
+                synchronized = SynchronizeState.Finish
+                manager.gameEnd(True)
+            elif synchronized is SynchronizeState.WaitBoth:
                 synchronized = SynchronizeState.WaitReceived
             elif synchronized is SynchronizeState.WaitSend:
                 synchronized = SynchronizeState.Finish
             print(synchronized)
         elif packet.type is PacketType.GAMEOVER:
             #게임 종료
-            manager.gameEnd()
+            manager.gameEnd(True)
 
     #다음 블럭 생성
     def spawnNewBlock(self, id = -1):
@@ -1773,7 +1792,7 @@ while True:
                 manager.keyPressed(keyCode)
     
     #패킷 처리
-    if gamemode is GameMode.Duel:
+    if gamemode is GameMode.Duel and networkState is NetworkState.Connected:
         try:
             packetPoolLock.acquire()
             while hasNextPacket():
