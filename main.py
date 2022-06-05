@@ -516,6 +516,10 @@ class Packet():
     def sendTo(self, _address = None):
         global netSocket
 
+        #패킷 복구 확인용 패킷 씹기
+        if False and not networkState is NetworkState.Connected and random.randint(0,2) == 0:
+            return
+
         if netSocket is None or not self.valid:
             return
 
@@ -559,18 +563,27 @@ def closeRoom(deep = 1):
     if deep > 5:
         return
 
+    print("1")
+
     if gamemode is GameMode.Network and appState is AppState.Run:
         manager.gameEnd(True)
         appState = AppState.Menu
+        menuState = MenuState.GameMode
+
+    print("2")
 
     if not netSocket is None and not address is None and networkState is NetworkState.Connected:
         #QUIT 패킷 전송
         packet = Packet(PacketInOut.OUT, {}, PacketType.QUIT)
         packet.sendTo()
 
+    print("3")
+
     if netSocket is None:
         networkState = NetworkState.Disconnected
         return
+
+    print("4")
 
     try:
         netSocket.close()
@@ -581,12 +594,14 @@ def closeRoom(deep = 1):
             #제대로 안 닫혔으면 닫힐 때까지 계속 실행
             closeRoom(deep + 1)
         return
+    print("5")
     try:
         packetPoolLock.acquire()
         packetPool = None
         returnedPackets = None
     finally:
         packetPoolLock.release()
+    print("6")
     networkState = NetworkState.Disconnected
     address = None
     netSocket = None
@@ -743,6 +758,7 @@ def runPacketListener():
             print("except 201-1")
             print(type(e), e)
             closeRoom()
+            print("close Room")
             return
         except Exception as e:
             #접속 종료 처리
@@ -1252,7 +1268,7 @@ class GameManager:
                     packet = Packet(PacketInOut.OUT, {}, PacketType.CANCEL_RESTART)
                 packet.sendTo()
             if self.gamevalue.remote and gamemode is GameMode.Network and (synchronizedGameSetting is SynchronizeState.WaitSend or synchronizedGameSetting is SynchronizeState.WaitBoth):
-                packet = Packet(PacketInOut.OUT, {"seed": localGameValue.RANDOM_SEED}, PacketType.SYNCHRONIZE_GAME_SETTING)
+                packet = Packet(PacketInOut.OUT, {"seed": localGameValue.RANDOM_SEED, "speed": localGameValue.TICK_PER_CELL}, PacketType.SYNCHRONIZE_GAME_SETTING)
                 packet.sendTo(address)
             if synchronizedGameSetting is not SynchronizeState.Synchronized:
                 return
@@ -1373,11 +1389,12 @@ class GameManager:
                 return
 
             #게임 설정 동기화
-            (seed, result) = packet.getIntValues("seed")
+            (seed, tps, result) = packet.getIntValues("seed", "speed")
 
             if not result:
                 return
             networkGameValue.RANDOM_SEED = seed
+            networkGameValue.TICK_PER_CELL = tps
             if synchronizedGameSetting is SynchronizeState.WaitBoth:
                 synchronizedGameSetting = SynchronizeState.WaitSend
             elif synchronizedGameSetting is SynchronizeState.WaitReceived:
@@ -1573,10 +1590,10 @@ class GameManager:
                         self.gameStart()
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40):
                     #게임 오버 - Back To Menu
-                    menuState = MenuState.Main
                     if gamemode is GameMode.Network:
                         closeRoom()
                     appState = AppState.Menu
+                    menuState = MenuState.Main
             elif localGameValue.gameState is GameState.Paused:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40):
                     #정지 메뉴 - Continue
@@ -1698,11 +1715,11 @@ class GameManager:
                 
                 displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                if localRestart:
+                if gamemode is GameMode.Network and localRestart:
                     displayInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
                     displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                if not localRestart:
+                if gamemode is GameMode.Local or not localRestart:
                     displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif localGameValue.gameState is GameState.Paused:
                 #정지 메뉴
@@ -1866,16 +1883,23 @@ while True:
     
     #패킷 처리
     if gamemode is GameMode.Network and networkState is NetworkState.Connected:
+        packet = None
+        while True:
+            try:
+                packetPoolLock.acquire()
+                if not hasNextPacket():
+                    break
+                packet = getNextPacket()
+            finally:
+                packetPoolLock.release()
+            if packet is not None:
+                networkManager.processPacket(packet)
         try:
             packetPoolLock.acquire()
-            while hasNextPacket():
-                packet = getNextPacket()
-                if packet is None or not packet.valid:
-                    continue
-                networkManager.processPacket(packet)
             passOverReturedPackets()
         finally:
             packetPoolLock.release()
+
 
     #메인 로직 처리
     if gamemode is GameMode.Network:
