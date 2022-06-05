@@ -11,6 +11,8 @@ from enum import Enum
 
 # --- 상수 영역 ------------------------------------------------------------------------------------------------------------------------------------------------
 
+GAME_VERSION = 1
+
 #실행 플레그
 FLAG_PRINT_DEBUG_LOG = True     #디버깅 메세지 출력
 FLAG_RANDOM_IGNORE_PACKET = False   #의도적으로 패킷 손실시키기
@@ -106,7 +108,6 @@ class NetworkState(Enum):
     Connecting = 1
     Connected = 2
 DEFAULT_PORT = 14500
-GAME_VERSION = 1
 class PacketInOut(Enum):
     In = 0
     Out = 1
@@ -213,51 +214,22 @@ synchronizedRestart = SynchronizeState.Synchronized     #재시작 동의 상태
 
 
 #--- 선정의 멤버 영역 ------------------------------------------------------------------------------------------------------------------------------------------------
-
-#--- 유틸 멤버
-
-#디버그 로그 출력
-def debugLog(*message): 
-    if FLAG_PRINT_DEBUG_LOG:
-        print(*message)
-
-def errorLog(type, message, *content):
-    additionalContent = ""
-    for index in range(0, len(content)):
-        if index % 2 == 0:
-            continue
-        additionalContent += str(content[index - 1]) + ": " + str(content[index]) + ", "
-    if len(additionalContent) > 0:
-        additionalContent = additionalContent[0:-2]
-    debugLog("[" + type + "] " + message + "   " + additionalContent)
-
-#랜덤으로 -1 또는 1을 반환 (블럭 회전값 랜덤 적용시 사용)
-def randomBit(ran):    
-    if ran.randint(0, 1) == 0:
-        return 1
-    else:
-        return -1
-
-#역순 입력 지원하는 range() 메소드
-def getRange(start, to, step): 
-    if step > 0:
-        if start > to:
-            return range(to, start, step)
-        else:
-            return range(start, to, step)
-    elif step == 0:
-        return []
-    else:
-        if start < to:
-            return range(to - 1, start - 1, step)
-        else:
-            return range(start, to, step)
         
-
 #--- 디스플레이 멤버
 
+#마우스 위치 검출
+def isCollideIn(pos, x, y, dx, dy):
+    posX = pos[0]
+    posY = pos[1]
+    leftX = x - dx / 2
+    rightX = x + dx / 2
+    upY = y + dy / 2
+    downY = y - dy / 2
+    
+    return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
+
 #화면에 글자 출력
-def displayText(string, x, y, size = 40, font = "arial", color = (0, 0, 0)): 
+def drawText(string, x, y, size = 40, font = "arial", color = (0, 0, 0)): 
     font = pygame.font.SysFont(font, size)
     text = font.render(string, True, color)
     rect = text.get_rect()
@@ -265,7 +237,7 @@ def displayText(string, x, y, size = 40, font = "arial", color = (0, 0, 0)):
     screen.blit(text, rect)
 
 #화면에 글자 + 사각형 배경 출력
-def displayTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial", color = (0, 0, 0), backgroundColor = (255, 255, 255)): 
+def drawTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial", color = (0, 0, 0), backgroundColor = (255, 255, 255)): 
     pygame.draw.rect(screen, backgroundColor, (x - dx / 2, y - dy / 2, dx, dy))
     font = pygame.font.SysFont(font, size)
     text = font.render(string, True, color)
@@ -274,14 +246,18 @@ def displayTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial", color 
     screen.blit(text, rect)
     
 #마우스에 반응하는 글자 + 사각형 배경 출력
-def displayInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain = 1.1, font = "arial",
+def drawInterectibleTextRect(pos, string, x, y, dx, dy = 40, size = 40, gain = 1.1, font = "arial",
                                 color = (0, 0, 0), backgroundColor = (255, 255, 255),
-                                newColor = (0, 0, 0), newBackgroundColor = (200, 200, 200)):            
+                                newColor = (0, 0, 0), newBackgroundColor = (200, 200, 200), ignoreAlert = False):            
     
+    if "alert" in displayObjects and displayObjects["alert"].enable and not ignoreAlert:
+        drawTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
+        return
+
     if isCollideIn(pos, x, y, dx, dy):
-        displayTextRect(string, x, y, int(dx * gain), int(dy * gain), int(size * gain), font, newColor, newBackgroundColor)
+        drawTextRect(string, x, y, int(dx * gain), int(dy * gain), int(size * gain), font, newColor, newBackgroundColor)
     else:
-        displayTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
+        drawTextRect(string, x, y, dx, dy, size, font, color, backgroundColor)
 
 #텍스트를 입력받을 수 있는 필드 (숫자만 가능)
 class TextField:    
@@ -309,12 +285,12 @@ class TextField:
     def draw(self):
         if self.enableFunction():
             if self.focused:
-                displayTextRect(self.content + "|", self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+                drawTextRect(self.content + "|", self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
             else:
                 if self.content == "":
-                    displayTextRect(self.placeHolder, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+                    drawTextRect(self.placeHolder, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
                 else:
-                    displayTextRect(self.content, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
+                    drawTextRect(self.content, self.x, self.y, self.dx, self.dy, self.size, self.font, self.color, self.backgroundColor)
 
     #클릭 검사
     def mouseDown(self, pos):
@@ -350,17 +326,93 @@ class TextField:
         else:
             return self.content
 
-#마우스 위치 검출
-def isCollideIn(pos, x, y, dx, dy):
-    posX = pos[0]
-    posY = pos[1]
-    leftX = x - dx / 2
-    rightX = x + dx / 2
-    upY = y + dy / 2
-    downY = y - dy / 2
+#알림창
+class AlertContainer:    
+    def __init__(self, content = [""], backgroundColor = (200, 200, 200), fontColor = (0, 0, 0), font = "arial", size =30,
+                 buttonFont = "arial", buttonFontSize = 30, buttonColor = (255, 255, 255), buttonbackgroundColor = (50, 50, 50),
+                 buttonHighlightColor = (255, 255, 255), buttonHighlightBackgroundColor = (100, 100, 100)):
+        self.enable = True
+        self.content = content
+        self.backgroundColor = backgroundColor
+        self.color = fontColor
+        self.font = font
+        self.size = size
+        self.buttonFont = buttonFont
+        self.buttonFontSize = buttonFontSize
+        self.buttonColor = buttonColor
+        self.buttonBackgroundColor = buttonbackgroundColor
+        self.buttonHighlightColor = buttonHighlightColor
+        self.buttonHighlightBackgroundColor = buttonHighlightBackgroundColor
     
-    return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
+    #화면에 출력
+    def draw(self):
+        if not self.enable:
+            return
 
+        pygame.draw.rect(screen, self.backgroundColor, (100, 75, 400, 250))
+        index = 1
+        for string in self.content:
+            drawText(string, 300, 75 + self.size * index, self.size, self.font, self.color)
+            index += 1
+        drawInterectibleTextRect(pygame.mouse.get_pos(), "close", 300, 325 - (self.buttonFontSize + 5) / 2 - 5, 100, (self.buttonFontSize + 5),
+                                 size = self.buttonFontSize, font = self.buttonFont, color = self.buttonColor, backgroundColor = self.buttonBackgroundColor,
+                                 newColor = self.buttonHighlightColor, newBackgroundColor = self.buttonHighlightBackgroundColor, ignoreAlert = True)
+
+    #클릭 검사
+    def mouseDown(self, pos):
+        if not self.enable:
+            return
+
+        if isCollideIn(pos, 300, 325 - (self.buttonFontSize + 5) / 2 - 10, 100, (self.buttonFontSize + 5)):
+            self.enable = False
+
+    #키 입력 처리
+    def keyDown(self, keyCode):
+        return
+
+#--- 유틸 멤버
+
+#디버그 로그 출력
+def debugLog(*message): 
+    if FLAG_PRINT_DEBUG_LOG:
+        print(*message)
+
+#에러 디버깅 로그 출력
+def errorLog(type, message, *content):
+    additionalContent = ""
+    for index in range(0, len(content)):
+        if index % 2 == 0:
+            continue
+        additionalContent += str(content[index - 1]) + ": " + str(content[index]) + ", "
+    if len(additionalContent) > 0:
+        additionalContent = additionalContent[0:-2]
+    debugLog("[" + type + "] " + message + "   " + additionalContent)
+
+#알림 창 출력
+def alertLog(*content):
+    displayObjects["alert"] = AlertContainer(list(content), font = "hancommalangmalang", buttonFont = "hancommalangmalang", size = 40, buttonFontSize = 25)
+
+#랜덤으로 -1 또는 1을 반환 (블럭 회전값 랜덤 적용시 사용)
+def randomBit(ran):    
+    if ran.randint(0, 1) == 0:
+        return 1
+    else:
+        return -1
+
+#역순 입력 지원하는 range() 메소드
+def getRange(start, to, step): 
+    if step > 0:
+        if start > to:
+            return range(to, start, step)
+        else:
+            return range(start, to, step)
+    elif step == 0:
+        return []
+    else:
+        if start < to:
+            return range(to - 1, start - 1, step)
+        else:
+            return range(start, to, step)
 
 #--- 람다 대용 멤버
 
@@ -425,11 +477,11 @@ class Packet():
 
             if not isinstance(_data, str):
                 self.valid = False
-                errorLog("except 101", "패킷 데이터가 String이 아닙니다", "data", _data)
+                errorLog("exception 101", "패킷 데이터가 String이 아닙니다", "data", _data)
                 return
             if len(_data) < 4:
                 self.valid = False
-                errorLog("except 102", "패킷 데이터가 너무 짧습니다", "data", _data)
+                errorLog("exception 102", "패킷 데이터가 너무 짧습니다", "data", _data)
                 return
 
             initial = _data[0:4]
@@ -444,7 +496,7 @@ class Packet():
                     break
             if self.type is PacketType.Invalid:
                 self.valid = False
-                errorLog("except 103", "일치하는 패킷 식별자가 없습니다", "initial", initial, "full data", _data)
+                errorLog("exception 103", "일치하는 패킷 식별자가 없습니다", "initial", initial, "full data", _data)
                 return
             
             #패킷 해석
@@ -458,7 +510,7 @@ class Packet():
                 for atomicData in splitedData:
                     splitedAtomicData = atomicData.split("?")
                     if len(splitedAtomicData) != 2:
-                        errorLog("except 104", "유효하지 않은 패킷 구조입니다", "target data", splitedAtomicData, "full data", _data)
+                        errorLog("exception 104", "유효하지 않은 패킷 구조입니다", "target data", splitedAtomicData, "full data", _data)
                         continue
                     decodedData[splitedAtomicData[0]] = splitedAtomicData[1]
 
@@ -466,14 +518,14 @@ class Packet():
             self.valid = True
         elif _input is PacketInOut.Out:     #내보낼 정보를 패킷으로 변환
             if not isinstance(_data, dict):
-                errorLog("except 111", "패킷 데이터가 Dictionary가 아닙니다", "data", _data)
+                errorLog("exception 111", "패킷 데이터가 Dictionary가 아닙니다", "data", _data)
                 self.valid = False
                 return
             self.type = _type
             self.data = _data
             self.valid = True
         else:       #이상한 값을 입력했을 때
-            errorLog("except 121", "올바르지 않은 패킷 타입입니다", "input", _input)
+            errorLog("exception 121", "올바르지 않은 패킷 타입입니다", "input", _input)
             self.valid = False
 
     #타입 체크까지 다 해서 값 반환
@@ -483,17 +535,17 @@ class Packet():
 
         for key in keys:
             if not self.valid:
-                errorLog("except 131", "유효하지 않은 패킷입니다")
+                errorLog("exception 131", "유효하지 않은 패킷입니다")
                 output.append(0)
                 result = False
                 continue
             if self.data[key] is None:
-                errorLog("except 132", "대상 값이 존재하지 않습니다", "key", key, "data", self.data)
+                errorLog("exception 132", "대상 값이 존재하지 않습니다", "key", key, "data", self.data)
                 output.append(0)
                 result = False
                 continue
             if not isinstance(self.data[key], str):
-                errorLog("except 133", "대상 값이 String이 아닙니다", "key", key, "value", self.data[key], "full data", self.data)
+                errorLog("exception 133", "대상 값이 String이 아닙니다", "key", key, "value", self.data[key], "full data", self.data)
                 output.append(0)
                 result = False
                 continue
@@ -501,7 +553,7 @@ class Packet():
             try:
                 output.append(int(self.data[key]))
             except Exception as e:
-                errorLog("except 134", "대상 값이 Int가 아닙니다", "key", key, "value", self.data[key], "full data", self.data)
+                errorLog("exception 134", "대상 값이 Int가 아닙니다", "key", key, "value", self.data[key], "full data", self.data)
                 debugLog(type(e), e)
                 output.append(0)
                 result = False
@@ -511,7 +563,7 @@ class Packet():
     #이 패킷의 정보를 인코딩하여 반환
     def getPackedData(self):
         if not self.valid:
-            errorLog("except 141", "유효하지 않은 패킷입니다")
+            errorLog("exception 141", "유효하지 않은 패킷입니다")
             return PACKET_IDENTIFIERS[PacketType.Invalid]
 
         encodedData = ""
@@ -533,15 +585,15 @@ class Packet():
             return
 
         if netSocket is None:
-            errorLog("except 151", "소켓이 존재하지 않습니다", "type", self.type, "data", self.data)
+            errorLog("exception 151", "소켓이 존재하지 않습니다", "type", self.type, "data", self.data)
             return
         if not self.valid:
-            errorLog("except 152", "유효하지 않은 패킷입니다")
+            errorLog("exception 152", "유효하지 않은 패킷입니다")
             return
 
         if _address is None:
             if address is None:
-                errorLog("except 153", "주소값이 존재하지 않습니다", "type", self.type, "data", self.data)
+                errorLog("exception 153", "주소값이 존재하지 않습니다", "type", self.type, "data", self.data)
                 return
 
             _address = address
@@ -550,7 +602,7 @@ class Packet():
             netSocket.sendto(self.getPackedData(), _address)
             debugLog(">>>", self.type, self.data)
         except Exception as e:
-            errorLog("except 154", "패킷 전송에 실패하였습니다", "socket", netSocket, "type", self.type, "data", self.data)
+            errorLog("exception 154", "패킷 전송에 실패하였습니다", "socket", netSocket, "type", self.type, "data", self.data)
             debugLog(type(e), e)
             return
 
@@ -570,7 +622,7 @@ def createRoom():
     debugLog("socket is opend")
 
 #방 제거
-def closeRoom(deep = 1):
+def closeRoom(deep = 1, useAlert = True, stay = False):
     global netSocket
     global networkState
     global address
@@ -582,13 +634,15 @@ def closeRoom(deep = 1):
 
     #스텍 오버플로우 방지용도
     if deep > 5:
-        errorLog("except 211", "Stack Over Flow")
+        errorLog("exception 211", "Stack Over Flow")
         return
 
-    if gamemode is GameMode.Network and appState is AppState.Game:
-        localManager.gameEnd(True)
-        appState = AppState.Menu
-        menuState = MenuState.GameMode
+    if gamemode is GameMode.Network:
+        if not localGameValue.gameState is GameState.GameOver and appState == AppState.Game:
+            localManager.gameEnd(True)
+        if not stay:
+            appState = AppState.Menu
+            menuState = MenuState.GameMode
 
     if not netSocket is None and not address is None and networkState is NetworkState.Connected:
         #QUIT 패킷 전송
@@ -596,14 +650,14 @@ def closeRoom(deep = 1):
         packet.sendTo()
 
     if netSocket is None:
-        errorLog("except 212", "소켓이 존재하지 않습니다")
+        errorLog("exception 212", "소켓이 존재하지 않습니다")
         networkState = NetworkState.Disconnected
         return
 
     try:
         netSocket.close()
     except Exception as e:
-        errorLog("except 213", "소켓 닫기에 실패하였습니다", "socket", netSocket)
+        errorLog("exception 213", "소켓 닫기에 실패하였습니다", "socket", netSocket)
         debugLog(type(e), e)
         if not netSocket is None:
             #제대로 안 닫혔으면 닫힐 때까지 계속 실행
@@ -620,6 +674,8 @@ def closeRoom(deep = 1):
     netSocket = None
     networkThead = None
     debugLog("socket is closed")
+    if useAlert:
+        alertLog("Connection is Closed")
 
 #접속 대기
 def waitEnter():
@@ -638,11 +694,12 @@ def waitEnter():
         netSocket.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
     except Exception as e:
         if displayObjects["port"] is None:
-            errorLog("except 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", "Text File is None")
+            errorLog("exception 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", "Text File is None")
         else:
-            errorLog("except 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", displayObjects["port"].getContent())
+            errorLog("exception 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", displayObjects["port"].getContent())
         debugLog(type(e), e)
-        closeRoom()
+        closeRoom(useAlert = False)
+        alertLog("Error 101", "Fail to bind socket", "Try for other port")
         return
     
     debugLog("socket is binded at port " + displayObjects["port"].getContent())
@@ -651,9 +708,10 @@ def waitEnter():
         (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except Exception as e:
-        errorLog("except 222", "클라이언트로부터 패킷 수신에 실패하엿습니다", "socket", netSocket)
+        errorLog("exception 222", "클라이언트로부터 패킷 수신에 실패하엿습니다", "socket", netSocket)
         debugLog(type(e), e)
-        closeRoom()
+        closeRoom(useAlert = False, stay = True)
+        waitEnter()
         return
 
     networkState = NetworkState.Connecting
@@ -661,21 +719,23 @@ def waitEnter():
     if not packet.valid or not packet.type is PacketType.AccessRequire:
         #이상한 패킷을 받았으면 취소
         if packet.valid:
-            errorLog("except 223", "올바르지 않은 패킷입니다", "type", packet.type)
+            errorLog("exception 223", "올바르지 않은 패킷입니다", "type", packet.type)
         else:
-            errorLog("except 223", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
-        closeRoom()
+            errorLog("exception 223", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
+        closeRoom(useAlert = False, stay = True)
+        waitEnter()
         return
     (version, result) = packet.getIntValues("ver")
     if not result or version != GAME_VERSION:
         #게임 버전이 일치하지 않으면 취소
         if result:
-            errorLog("except 224", "게임 버전이 일치하지 않습니다", "local version", GAME_VERSION, "remote version", version)
+            errorLog("exception 224", "게임 버전이 일치하지 않습니다", "local version", GAME_VERSION, "remote version", version)
         else:
-            errorLog("except 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+            errorLog("exception 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
         packet = Packet(PacketInOut.Out, {}, PacketType.AccessDeny)
         packet.sendTo(_address)
-        closeRoom()
+        closeRoom(useAlert = False, stay = True)
+        waitEnter()
         return
 
     #접속 수락 패킷 전송
@@ -723,19 +783,21 @@ def enterRoom(_ip, _port):
         (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except Exception as e:
-        errorLog("except 231", "서버로부터 패킷 수신에 실패하였습니다", "socket", netSocket)
+        errorLog("exception 231", "서버로부터 패킷 수신에 실패하였습니다", "socket", netSocket)
         debugLog(type(e), e)
-        closeRoom()
+        closeRoom(useAlert = False, stay = True)
         return
 
     packet = Packet(PacketInOut.In, data)
     if not packet.valid or not packet.type is PacketType.AccessAccept:
         #접속 수락 패킷이 아니면 취소
         if packet.valid:
-            errorLog("except 232", "올바르지 않은 패킷입니다", "type", packet.type)
+            errorLog("exception 232", "올바르지 않은 패킷입니다", "type", packet.type)
         else:
-            errorLog("except 233", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
-        closeRoom()
+            errorLog("exception 233", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
+        closeRoom(useAlert = False, stay = True)
+        if packet.valid and packet.type == PacketType.AccessDeny:
+            alertLog("Error 103", "Incorrect game version", "please check game version")
         return
 
     address = _address
@@ -760,7 +822,7 @@ def runPacketListener():
     while(True):
         #접속 종료 처리
         if netSocket is None:
-            errorLog("except 241", "소켓이 존재하지 않습니다")
+            errorLog("exception 241", "소켓이 존재하지 않습니다")
             closeRoom()
             return
 
@@ -770,27 +832,27 @@ def runPacketListener():
             data = rawData.decode()
         except ConnectionResetError as e:
             #접속 종료 처리
-            errorLog("except 242", "접속이 종료되었습니다")
+            errorLog("exception 242", "접속이 종료되었습니다")
             debugLog(type(e), e)
             closeRoom()
             return
         except Exception as e:
             #접속 종료 처리
             if netSocket is None:
-                errorLog("except 243", "소켓이 존재하지 않습니다")
+                errorLog("exception 243", "소켓이 존재하지 않습니다")
                 debugLog(type(e), e)
                 closeRoom()
                 return
-            errorLog("except 244", "패킷 수신 중 오류가 발생하였습니다")
+            errorLog("exception 244", "패킷 수신 중 오류가 발생하였습니다")
             debugLog(type(e), e)
             continue
         packet = Packet(PacketInOut.In, data)
         if not packet.valid or packet.type is PacketType.Invalid:
             #이상한 패킷이면 취소
             if packet.valid:
-                errorLog("except 245", "올바르지 않은 패킷입니다", "type", packet.type)
+                errorLog("exception 245", "올바르지 않은 패킷입니다", "type", packet.type)
             else:
-                errorLog("except 246", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
+                errorLog("exception 246", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
             continue
         
         #큐에 추가
@@ -806,7 +868,7 @@ def runPacketListener():
 #다음 패킷 가져오기, lock 필수
 def getNextPacket():
     if packetPool is None:
-        errorLog("except 251", "패킷 풀이 존재하지 않습니다")
+        errorLog("exception 251", "패킷 풀이 존재하지 않습니다")
         return None
 
     if len(packetPool) <= 0:
@@ -820,7 +882,7 @@ def getNextPacket():
 #반환된 패킷 넘기기, lock 필수
 def passOverReturedPackets():
     if packetPool is None or returnedPackets is None:
-        errorLog("except 252", "패킷 풀이 존재하지 않습니다")
+        errorLog("exception 252", "패킷 풀이 존재하지 않습니다")
         return
 
     for packet in returnedPackets:
@@ -830,7 +892,7 @@ def passOverReturedPackets():
 #패킷 반환, lock 필수
 def postponePacket(packet):
     if returnedPackets is None:
-        errorLog("except 253", "패킷 풀이 존재하지 않습니다")
+        errorLog("exception 253", "패킷 풀이 존재하지 않습니다")
         return
 
     returnedPackets.append(packet)
@@ -838,7 +900,7 @@ def postponePacket(packet):
 #다음 패킷 존재 여부, lock 필수
 def hasNextPacket():
     if packetPool is None:
-        errorLog("except 254", "패킷 풀이 존재하지 않습니다")
+        errorLog("exception 254", "패킷 풀이 존재하지 않습니다")
         return False
 
     isEmpty = len(packetPool) == 0
@@ -1415,7 +1477,7 @@ class GameManager:
                         try:
                             color = ALL_BLOCK_COLORS[int(strData[index]) - 1]
                         except Exception as e:
-                            errorLog("except 301", "올바르지 않은 패킷 데이터입니다", "data", strData[index], "full data", packet.data)
+                            errorLog("exception 301", "올바르지 않은 패킷 데이터입니다", "data", strData[index], "full data", packet.data)
                             debugLog(type(e), e)
                             return
                         tmp.append(Cell(CellState.Occupied, color))
@@ -1569,7 +1631,10 @@ class GameManager:
             return
         
         pos = pygame.mouse.get_pos()
-        
+
+        if "alert" in displayObjects and displayObjects["alert"].enable:
+            return
+
         if appState is AppState.Menu:
             if menuState is MenuState.Main:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40):
@@ -1590,6 +1655,7 @@ class GameManager:
                     self.gameStart()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #게임 플레이 - Create Room
+                    gamemode = GameMode.Network
                     menuState = MenuState.CreateRoom
                     createRoom()
 
@@ -1600,6 +1666,7 @@ class GameManager:
                     networkThead.start()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 165, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #게임 플레이 - Enter Room
+                    gamemode = GameMode.Network
                     menuState = MenuState.EnterRoom
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #세팅 - Quit
@@ -1651,13 +1718,13 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     if not networkState is NetworkState.Connected:
                         #방 생성 - Quit
-                        closeRoom()
+                        closeRoom(useAlert = False)
                         menuState = MenuState.GameMode
             elif menuState == MenuState.EnterRoom:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     if not networkState is NetworkState.Connected:
                         #방 입장 - Quit
-                        closeRoom()
+                        closeRoom(useAlert = False)
                         menuState = MenuState.GameMode
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55):
                     if networkState is NetworkState.Disconnected:
@@ -1675,7 +1742,7 @@ class GameManager:
                         networkThead.start()
                     elif networkState is NetworkState.Connecting:
                         #방 입장 - Cancel
-                        closeRoom()
+                        closeRoom(useAlert = False)
         elif appState is AppState.Game:
             if localGameValue.gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
@@ -1695,7 +1762,7 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40):
                     #게임 오버 - Back To Menu
                     if gamemode is GameMode.Network:
-                        closeRoom()
+                        closeRoom(useAlert = False)
                     appState = AppState.Menu
                     menuState = MenuState.Main
             elif localGameValue.gameState is GameState.Paused:
@@ -1703,17 +1770,18 @@ class GameManager:
                     #정지 메뉴 - Continue
                     localGameValue.gameState = localGameValue.prePauseState
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40):
-                    #정지 메뉴 - Restart
                     if gamemode is GameMode.Network:
-                        return
-
-                    self.gameEnd()
-                    self.gameReset()
-                    self.gameStart()
+                        #정지 메뉴 - Give Up
+                        self.gameEnd()
+                    else:
+                        #정지 메뉴 - Restart
+                        self.gameEnd()
+                        self.gameReset()
+                        self.gameStart()
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40):
                     #정지 메뉴 - Back To Menu
                     if gamemode is GameMode.Network:
-                        closeRoom()
+                        closeRoom(useAlert = False)
                     else:
                         self.gameEnd()
                     menuState = MenuState.Main
@@ -1802,126 +1870,132 @@ class GameManager:
         if appState is AppState.Menu:
             if menuState is MenuState.Main:
                 #메인 메뉴
-                displayText("Tetris", SCREEN_WIDTH / 2, 100, size = 60, color = (255, 255, 255), font = "hancommalangmalang")
-                displayText("highScore " + str(highScore), SCREEN_WIDTH / 2, 150, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Tetris", SCREEN_WIDTH / 2, 100, size = 60, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("highScore " + str(highScore), SCREEN_WIDTH / 2, 150, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
 
-                displayInterectibleTextRect(pos, "New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.GameMode:
                 #게임 모드 설정
-                displayInterectibleTextRect(pos, "Sole", SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140, size = 80, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Create Room", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Enter Room", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 160, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Sole", SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140, size = 80, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Create Room", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Enter Room", 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 160, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.KeySetting:
                 #키 설정
-                displayText("Key Setting", SCREEN_WIDTH / 2, 50, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Key Setting", SCREEN_WIDTH / 2, 50, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
 
 
-                displayText("Move Left", SCREEN_WIDTH / 2 - 200, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_LEFT).upper(), SCREEN_WIDTH / 2 - 70, 130, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawText("Move Left", SCREEN_WIDTH / 2 - 200, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, pygame.key.name(KEY_LEFT).upper(), SCREEN_WIDTH / 2 - 70, 130, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
-                displayText("Move Right", SCREEN_WIDTH / 2 - 200, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_RIGHT).upper(), SCREEN_WIDTH / 2 - 70, 180, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawText("Move Right", SCREEN_WIDTH / 2 - 200, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, pygame.key.name(KEY_RIGHT).upper(), SCREEN_WIDTH / 2 - 70, 180, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
-                displayText("Turn Left", SCREEN_WIDTH / 2 - 200, 230, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_LEFT).upper(), SCREEN_WIDTH / 2 - 70, 230, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawText("Turn Left", SCREEN_WIDTH / 2 - 200, 230, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, pygame.key.name(KEY_TURN_LEFT).upper(), SCREEN_WIDTH / 2 - 70, 230, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
-                displayText("Turn Right", SCREEN_WIDTH / 2 - 200, 280, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_TURN_RIGHT).upper(), SCREEN_WIDTH / 2 - 70, 280, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawText("Turn Right", SCREEN_WIDTH / 2 - 200, 280, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, pygame.key.name(KEY_TURN_RIGHT).upper(), SCREEN_WIDTH / 2 - 70, 280, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
-                displayText("Drop Fast", SCREEN_WIDTH / 2 + 100, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_FAST_DROP).upper(), SCREEN_WIDTH / 2 + 230, 130, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawText("Drop Fast", SCREEN_WIDTH / 2 + 100, 130, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, pygame.key.name(KEY_FAST_DROP).upper(), SCREEN_WIDTH / 2 + 230, 130, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
-                displayText("Pause Game", SCREEN_WIDTH / 2 + 100, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, pygame.key.name(KEY_PAUSE).upper(), SCREEN_WIDTH / 2 + 230, 180, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawText("Pause Game", SCREEN_WIDTH / 2 + 100, 180, size = 20, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, pygame.key.name(KEY_PAUSE).upper(), SCREEN_WIDTH / 2 + 230, 180, 100, 30, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
 
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Setting:
                 #설정
-                displayText("Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 
-                displayInterectibleTextRect(pos, "Key Setting", SCREEN_WIDTH / 2, 170, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "NetWork", SCREEN_WIDTH / 2, 220, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Help", SCREEN_WIDTH / 2, 270, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Key Setting", SCREEN_WIDTH / 2, 170, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "NetWork", SCREEN_WIDTH / 2, 220, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Help", SCREEN_WIDTH / 2, 270, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.NewWorkSetting:
                 #네트워크 설정
-                displayText("Network Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Network Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
 
-                displayText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
 
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
                 #방 생성
                 if networkState is NetworkState.Disconnected:
-                    displayText("Waiting Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText("Waiting Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
                 elif networkState is NetworkState.Connecting:
-                    displayText("Connecting", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText("Connecting", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
                 elif networkState is NetworkState.Connected:
-                    displayText("Connected!", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText("Connected!", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
 
                 if not networkState is NetworkState.Connected:
-                    displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.EnterRoom:
                 #방 입장
                 if networkState is NetworkState.Connecting:
-                    displayText("Connecting", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText("Connecting", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
                 elif networkState is NetworkState.Connected:
-                    displayText("Connected!", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText("Connected!", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
 
                 if networkState is NetworkState.Disconnected:
-                    displayInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 elif networkState is NetworkState.Connecting:
-                    displayInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
                 if not networkState is NetworkState.Connected:
-                    displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
                 #도움말
-                displayText("Help", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Help", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 
-                displayText("move block to fill line", SCREEN_WIDTH / 2, 120, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
-                displayText("try not to fill screen", SCREEN_WIDTH / 2, 150, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
-                displayText("you can play both sole", SCREEN_WIDTH / 2, 200, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
-                displayText("and even with your friend!", SCREEN_WIDTH / 2, 230, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
-                displayText("please enjoy this game", SCREEN_WIDTH / 2, 280, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
+                drawText("move block to fill line", SCREEN_WIDTH / 2, 120, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
+                drawText("try not to fill screen", SCREEN_WIDTH / 2, 150, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
+                drawText("you can play both sole", SCREEN_WIDTH / 2, 200, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
+                drawText("and even with your friend!", SCREEN_WIDTH / 2, 230, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
+                drawText("please enjoy this game", SCREEN_WIDTH / 2, 280, size = 30, color = (200, 200, 200), font = "hancommalangmalang")
                 
-                displayInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
         elif appState is AppState.Game:
             if localGameValue.gameState is GameState.GameOver:
                 #게임 오버
-                displayTextRect("Game Over", SCREEN_WIDTH / 2, 100, dx = SCREEN_WIDTH, dy = 70, size = 60, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
+                drawTextRect("Game Over", SCREEN_WIDTH / 2, 100, dx = SCREEN_WIDTH, dy = 70, size = 60, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
+                drawTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
+                if remoteRestart:
+                    drawText("Restart Require!", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 157, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
+                elif localRestart:
+                    drawText("Waiting Other Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 157, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
                 if gamemode is GameMode.Network and localRestart:
-                    displayInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
-                    displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 if gamemode is GameMode.Local or not localRestart:
-                    displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif localGameValue.gameState is GameState.Paused:
                 #정지 메뉴
-                displayTextRect("Paused", SCREEN_WIDTH / 2, 100, dx = SCREEN_WIDTH, dy = 70, size = 60, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
+                drawTextRect("Paused", SCREEN_WIDTH / 2, 100, dx = SCREEN_WIDTH, dy = 70, size = 60, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
+                drawTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                displayInterectibleTextRect(pos, "Continue", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Continue", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 if gamemode is GameMode.Local:
-                    displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                else:
+                    drawInterectibleTextRect(pos, "Give Up", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             else:
                 #게임 중
                 if gamemode is GameMode.Network:
-                    displayText(str(localGameValue.score), 250, 50, color = (255, 255, 255), font = "hancommalangmalang")
-                    displayText(str(remoteGameValue.score), 550, 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText(str(localGameValue.score), 250, 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText(str(remoteGameValue.score), 550, 50, color = (255, 255, 255), font = "hancommalangmalang")
                 else:
-                    displayText(str(localGameValue.score), 500, 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawText(str(localGameValue.score), 500, 50, color = (255, 255, 255), font = "hancommalangmalang")
      
 
 #--- 메인 로직 영역 ------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1954,7 +2028,7 @@ while True:
             if event.type == pygame.QUIT:
                 try:
                     if gamemode is GameMode.Network and networkState is NetworkState.Connected:
-                        closeRoom()
+                        closeRoom(useAlert = False)
                     if appState is AppState.Run and not localManager.gameState == GameState.GameOver:
                         localManager.gameEnd()
                 finally:
@@ -2036,7 +2110,7 @@ while True:
         clock.tick(TPS)
     except Exception as e:
         #전체 에러 처리기
-        debugLog(e.type, e)
+        debugLog(type(e), e)
         if networkState is None:
             networkState = NetworkState.Disconnected
             closeRoom()
