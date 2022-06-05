@@ -152,6 +152,7 @@ class IngameValue():
         self.gameState = GameState.WaitNewBlock
         self.prePauseState = GameState.WaitNewBlock
         self.preAnimaionState = GameState.WaitNewBlock
+        self.cellLock = threading.Lock()
         self.cells = []
         self.score = 0
         self.combo = 0
@@ -338,24 +339,28 @@ class Animation:
     def update(self):
         self.tick += 1
         if self.type == AnimationType.LineClear:
-            if self.tick == 1:
-                for x in range(0, HORIZONTAL_CELL_COUNT):
-                    for y in self.var:
-                        self.gamevalue.cells[x][y].changeState(
-                            CellState.Occupied, (255, 255, 255))
-            elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
-                for x in range(0, HORIZONTAL_CELL_COUNT):
-                    for y in self.var:
-                        self.gamevalue.cells[x][y].changeState(CellState.Empty, (255, 0, 0))
-                for locY in sorted(self.var):
-                    for y in range(locY, 1, -1):
-                        for x in range(0, HORIZONTAL_CELL_COUNT):
+            try:
+                self.gamevalue.cellLock.acquire()
+                if self.tick == 1:
+                    for x in range(0, HORIZONTAL_CELL_COUNT):
+                        for y in self.var:
                             self.gamevalue.cells[x][y].changeState(
-                                self.gamevalue.cells[x][y - 1].state, self.gamevalue.cells[x][y - 1].color)
-                self.gamevalue.animations.remove(self)
-            elif self.tick >= 3:
-                for y in self.var:
-                    self.gamevalue.cells[self.tick - 3][y].changeState(CellState.Empty, (255, 255, 255))
+                                CellState.Occupied, (255, 255, 255))
+                elif (self.tick - 3) >= HORIZONTAL_CELL_COUNT:
+                    for x in range(0, HORIZONTAL_CELL_COUNT):
+                        for y in self.var:
+                            self.gamevalue.cells[x][y].changeState(CellState.Empty, (255, 0, 0))
+                    for locY in sorted(self.var):
+                        for y in range(locY, 1, -1):
+                            for x in range(0, HORIZONTAL_CELL_COUNT):
+                                self.gamevalue.cells[x][y].changeState(
+                                    self.gamevalue.cells[x][y - 1].state, self.gamevalue.cells[x][y - 1].color)
+                    self.gamevalue.animations.remove(self)
+                elif self.tick >= 3:
+                    for y in self.var:
+                        self.gamevalue.cells[self.tick - 3][y].changeState(CellState.Empty, (255, 255, 255))
+            finally:
+                self.gamevalue.cellLock.release()
 
 #람다 대용
 def setLeftMoveKey(keyCode):
@@ -480,7 +485,7 @@ class Packet():
             try:
                 output.append(int(self.data[key]))
             except Exception as e:
-                print(e)
+                print(type(e), e)
                 output.append(0)
                 result = False
         output.append(result)
@@ -516,7 +521,7 @@ class Packet():
         try:
             netSocket.sendto(self.getPackedData(), _address)
         except Exception as e:
-            print(e)
+            print(type(e), e)
             return
 
 #방 생성
@@ -566,15 +571,17 @@ def closeRoom(deep = 1):
         netSocket.close()
     except Exception as e:
         print("except Exception as e 301")
-        print(e)
+        print(type(e), e)
         if not netSocket is None:
             #제대로 안 닫혔으면 닫힐 때까지 계속 실행
             closeRoom(deep + 1)
         return
-    packetPoolLock.acquire()
-    packetPool = None
-    returnedPackets = None
-    packetPoolLock.release()
+    try:
+        packetPoolLock.acquire()
+        packetPool = None
+        returnedPackets = None
+    finally:
+        packetPoolLock.release()
     netSocket = None
     networkThead = None
 
@@ -596,7 +603,7 @@ def waitEnter():
         netSocket.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
     except Exception as e:
         print("except Exception as e 102")
-        print(e)
+        print(type(e), e)
         closeRoom()
         return
 
@@ -607,7 +614,7 @@ def waitEnter():
         data = rawData.decode()
     except Exception as e:
         print("except Exception as e 103")
-        print(e)
+        print(type(e), e)
         closeRoom()
         return
 
@@ -637,13 +644,15 @@ def waitEnter():
 
     address = _address
     networkState = NetworkState.Connected
-    packetPoolLock.acquire()
-    packetPool = []
-    returnedPackets = []
-    packetPoolLock.release()
+    try:
+        packetPoolLock.acquire()
+        packetPool = []
+        returnedPackets = []
+    finally:
+        packetPoolLock.release()
     gamemode = GameMode.Duel
 
-    print("done. change network state")
+    print("done. change network state. addr : " + str(address))
 
     t = threading.Thread(target=runPacketListener, daemon=True)
     t.start()
@@ -669,13 +678,17 @@ def enterRoom(_ip, _port):
     packet = Packet(PacketInOut.OUT, {"ver" : GAME_VERSION}, PacketType.ACCESS_REQUIRE)
     packet.sendTo((_ip, _port))
 
+    data = None
     try:
         #서버측 응답 대기
         (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
     except Exception as e:
         print("except Exception as e 101")
-        print(e)
+        print(type(e), e)
+        if data is not None:
+            packet = Packet(PacketInOut.IN, data)
+            print(packet.type, packet.data)
         closeRoom()
         return
 
@@ -690,13 +703,15 @@ def enterRoom(_ip, _port):
 
     address = _address
     networkState = NetworkState.Connected
-    packetPoolLock.acquire()
-    packetPool = []
-    returnedPackets = []
-    packetPoolLock.release()
+    try:
+        packetPoolLock.acquire()
+        packetPool = []
+        returnedPackets = []
+    finally:
+        packetPoolLock.release()
     gamemode = GameMode.Duel
 
-    print("done. change network state")
+    print("done. change network state. addr : " + str(address))
 
     t = threading.Thread(target=runPacketListener, daemon=True)
     t.start()
@@ -737,12 +752,14 @@ def runPacketListener():
             continue
         
         #큐에 추가
-        packetPoolLock.acquire()
-        if packetPool is None:
-            return
-        print(packet.type, packet.data)
-        packetPool.append(packet)
-        packetPoolLock.release()
+        try:
+            packetPoolLock.acquire()
+            if packetPool is None:
+                return
+            print(packet.type, packet.data)
+            packetPool.append(packet)
+        finally:
+            packetPoolLock.release()
 
 #다음 패킷 가져오기, lock 필수
 def getNextPacket():
@@ -929,15 +946,19 @@ class Block:
     #블럭 고정
     def landing(self):
         #블럭 배치
-        for x in range(0, len(self.curState)):
-            for y in range(0, len(self.curState[0])):
-                if y + self.y < 0:
-                    continue
-                
-                if self.curState[x][y] is CellState.Occupied:
-                    if x + self.x < 0 or x + self.x >= HORIZONTAL_CELL_COUNT or y + self.y < 0 or y + self.y > VERTICAL_CELL_COUNT:
+        try:
+            self.gamevalue.cellLock.acquire()
+            for x in range(0, len(self.curState)):
+                for y in range(0, len(self.curState[0])):
+                    if y + self.y < 0:
                         continue
-                    self.gamevalue.cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
+                    
+                    if self.curState[x][y] is CellState.Occupied:
+                        if x + self.x < 0 or x + self.x >= HORIZONTAL_CELL_COUNT or y + self.y < 0 or y + self.y > VERTICAL_CELL_COUNT:
+                            continue
+                        self.gamevalue.cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
+        finally:
+            self.gamevalue.cellLock.release()
         
         #게임 종료 감지
         if not self.gamevalue.remote and self.y - len(self.curState[0]) + 1 < 0:
@@ -953,11 +974,15 @@ class Block:
 
         #라인 클리어 처리
         lines = []
-        for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
-            if self.lineCheck(y):
-                lines.append(y)
-                self.gamevalue.score += SCORE_PER_LINE + COMBO_SCORE * self.gamevalue.combo
-                self.gamevalue.combo += 1
+        try:
+            self.gamevalue.cellLock.acquire()
+            for y in range(self.y + len(self.curState[0]) - 1, self.y - 1, - 1):
+                if self.lineCheck(y):
+                    lines.append(y)
+                    self.gamevalue.score += SCORE_PER_LINE + COMBO_SCORE * self.gamevalue.combo
+                    self.gamevalue.combo += 1
+        finally:
+            self.gamevalue.cellLock.release()
         #콤보 점수 처리
         if len(lines) > 0:
             self.gamevalue.animations.append(Animation(AnimationType.LineClear, lines, self.gamevalue))
@@ -970,6 +995,7 @@ class Block:
     #셀 배치 동기화        
     def synchronizeCells(self):
         if gamemode is GameMode.Duel:
+
             encodedCells = ""
             for x in range(0, HORIZONTAL_CELL_COUNT):
                 for y in range(0, VERTICAL_CELL_COUNT):
@@ -977,7 +1003,7 @@ class Block:
                         encodedCells += str(ALL_BLOCK_COLORS.index(self.gamevalue.cells[x][y].color) + 1)
                     else:
                         encodedCells += "0"
-            packet = Packet(PacketInOut.OUT, {"tick": self.gamevalue.manager.tick, "cells": encodedCells, "score": self.gamevalue.score, "combo": self.gamevalue.combo}, PacketType.BLOCK_LANDING)
+            packet = Packet(PacketInOut.OUT, {"tick": self.gamevalue.manager.tick, "cells": "1" + str(encodedCells), "score": self.gamevalue.score, "combo": self.gamevalue.combo}, PacketType.BLOCK_LANDING)
             packet.sendTo()
 
     #라인 클리어 확인
@@ -1073,11 +1099,20 @@ class GameManager:
         self.gamevalue.curBlock = None
         self.gamevalue.score = 0
         self.gamevalue.combo = 0
-        self.gamevalue.cells.clear()
+        try:
+            self.gamevalue.cellLock.acquire()
+            self.gamevalue.cells.clear()
+            for x in range(0, HORIZONTAL_CELL_COUNT):
+                tmp = []
+                for y in range(0, VERTICAL_CELL_COUNT):
+                    tmp.append(Cell())
+                self.gamevalue.cells.append(tmp)
+        finally:
+            self.gamevalue.cellLock.release()
         self.gamevalue.blockID = 0
         self.gamevalue.RANDOM_SEED = self.gamevalue.random.randrange(0, sys.maxsize)
         self.gamevalue.random.seed(self.gamevalue.RANDOM_SEED)
-        if not self.gamevalue.remote:
+        if self.gamevalue.remote:
             synchronized = SynchronizeState.WaitBoth
 
         if gamemode is GameMode.Sole:
@@ -1087,12 +1122,6 @@ class GameManager:
                 self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_RIGHT
             else:
                 self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_LEFT
-
-        for x in range(0, HORIZONTAL_CELL_COUNT):
-            tmp = []
-            for y in range(0, VERTICAL_CELL_COUNT):
-                tmp.append(Cell())
-            self.gamevalue.cells.append(tmp)
     
     #게임 종료
     def gameEnd(self):
@@ -1182,7 +1211,8 @@ class GameManager:
     #틱당 1회 실행됨
     def update(self):
         if appState is AppState.Run:
-            if not self.gamevalue.remote and gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitSend or synchronized is SynchronizeState.WaitBoth):
+            if self.gamevalue.remote and gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitSend or synchronized is SynchronizeState.WaitBoth):
+                print(synchronized, self.gamevalue.remote)
                 packet = Packet(PacketInOut.OUT, {"seed": localGameValue.RANDOM_SEED}, PacketType.SYNCHRONIZE_GAME_SETTING)
                 packet.sendTo(address)
             if gamemode is GameMode.Duel and (synchronized is SynchronizeState.WaitReceived or synchronized is SynchronizeState.WaitBoth):
@@ -1231,7 +1261,7 @@ class GameManager:
             if not result:
                 return
             if self.gamevalue.curBlock is None or self.gamevalue.curBlock.id != id:
-                return
+                self.spawnNewBlock(id)
             if self.tick < remoteTick:
                 postponePacket(packet)
                 return
@@ -1255,6 +1285,7 @@ class GameManager:
             decodedCells = []
             index = 0
             strData = str(_cells)
+            strData = strData[1:]
             if len(strData) < HORIZONTAL_CELL_COUNT * VERTICAL_CELL_COUNT:
                 return
             for x in range(0, HORIZONTAL_CELL_COUNT):
@@ -1266,14 +1297,18 @@ class GameManager:
                         try:
                             color = ALL_BLOCK_COLORS[int(strData[index]) - 1]
                         except Exception as e:
-                            print(e)
+                            print(type(e), e)
                             return
                         tmp.append(Cell(CellState.Occupied, color))
                     index += 1
                 decodedCells.append(tmp)
             self.gamevalue.score = _score
             self.gamevalue.combo = _combo
-            self.gamevalue.cells = decodedCells
+            try:
+                self.gamevalue.cellLock.acquire()
+                self.gamevalue.cells = decodedCells
+            finally:
+                self.gamevalue.cellLock.release()
         elif packet.type is PacketType.CHANGE_TICK_PRE_CELL:
             #블럭 하락 속도 동기화
             (remoteTick, speed, result) = packet.getIntValues("tick", "speed")
@@ -1287,6 +1322,8 @@ class GameManager:
             self.gamevalue.TICK_PER_CELL = speed
         elif packet.type is PacketType.SYNCHRONIZE_GAME_SETTING:
             if synchronized is SynchronizeState.Finish or synchronized is SynchronizeState.WaitSend:
+                packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
+                packetOut.sendTo()
                 return
 
             #게임 설정 동기화
@@ -1316,11 +1353,14 @@ class GameManager:
             manager.gameEnd()
 
     #다음 블럭 생성
-    def spawnNewBlock(self):
+    def spawnNewBlock(self, id = -1):
+        if id <= -1:
+            id = self.gamevalue.blockID
+        self.gamevalue.random.seed(self.gamevalue.RANDOM_SEED + id)
         self.gamevalue.curBlock = Block(ALL_BLOCK_STATES[self.gamevalue.random.randint(0, len(ALL_BLOCK_STATES) - 1)], self.gamevalue, self.gamevalue.blockID,
                          color = ALL_BLOCK_COLORS[self.gamevalue.random.randint(0, len(ALL_BLOCK_COLORS) - 1)],
                          dirZ = randomBit(self.gamevalue.random), dirX = randomBit(self.gamevalue.random), dirY = randomBit(self.gamevalue.random), x = self.gamevalue.lastX)
-        self.gamevalue.blockID += 1
+        self.gamevalue.blockID = id + 1
         self.gamevalue.gameState = GameState.Drop
 
     #마우스 클릭시 
@@ -1734,14 +1774,16 @@ while True:
     
     #패킷 처리
     if gamemode is GameMode.Duel:
-        packetPoolLock.acquire()
-        while hasNextPacket():
-            packet = getNextPacket()
-            if packet is None or not packet.valid:
-                continue
-            networkManager.processPacket(packet)
-        passOverReturedPackets()
-        packetPoolLock.release()
+        try:
+            packetPoolLock.acquire()
+            while hasNextPacket():
+                packet = getNextPacket()
+                if packet is None or not packet.valid:
+                    continue
+                networkManager.processPacket(packet)
+            passOverReturedPackets()
+        finally:
+            packetPoolLock.release()
 
     #메인 로직 처리
     if gamemode is GameMode.Duel:
