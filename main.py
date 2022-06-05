@@ -146,6 +146,8 @@ highScore = 0
 manager = None
 listener = None #키 설정 용도
 displayObjects = {} #텍스트 필드들
+localRestart = False
+networkRestart = False
 
 #인게임 변수
 class IngameValue():
@@ -186,12 +188,11 @@ class SynchronizeState(Enum):
     WaitBoth = 0
     WaitReceived = 1
     WaitSend = 2
-    Finish = 3
-    WaitGameOver = 4
-    FinishGameOver = 5
-    WaitRestart = 6
-    FinishRestart = 7
-synchronized = SynchronizeState.WaitBoth
+    Synchronized = 3
+synchronizedGameSetting = SynchronizeState.Synchronized
+synchronizedGameOver = SynchronizeState.Synchronized
+synchronizedRestart = SynchronizeState.Synchronized
+
 
 
 
@@ -515,10 +516,6 @@ class Packet():
     def sendTo(self, _address = None):
         global netSocket
 
-        #패킷 씹기 (복구 기능 테스트 용도)
-        if False and networkState is NetworkState.Connected and random.randint(0, 3) == 0:
-            return
-
         if netSocket is None or not self.valid:
             return
 
@@ -566,16 +563,14 @@ def closeRoom(deep = 1):
         manager.gameEnd(True)
         appState = AppState.Menu
 
-    networkState = NetworkState.Disconnected
-
-    if netSocket is None:
-        return
-
-    if not address is None:
+    if not netSocket is None and not address is None and networkState is NetworkState.Connected:
         #QUIT 패킷 전송
         packet = Packet(PacketInOut.OUT, {}, PacketType.QUIT)
         packet.sendTo()
-        address = None
+
+    if netSocket is None:
+        networkState = NetworkState.Disconnected
+        return
 
     try:
         netSocket.close()
@@ -592,6 +587,8 @@ def closeRoom(deep = 1):
         returnedPackets = None
     finally:
         packetPoolLock.release()
+    networkState = NetworkState.Disconnected
+    address = None
     netSocket = None
     networkThead = None
 
@@ -1095,15 +1092,22 @@ class GameManager:
     #게임 시작
     def gameStart(self):
         global appState
+        global synchronizedGameSetting
 
         self.gameReset()
         self.gamevalue.gameState = GameState.WaitNewBlock
         if not self.gamevalue.remote:
             appState = AppState.Run
+        if gamemode is GameMode.Network:
+            synchronizedGameSetting = SynchronizeState.WaitBoth
     
     #게임 리셋
     def gameReset(self):
-        global synchronized
+        global synchronizedGameOver
+        global synchronizedGameSetting
+        global synchronizedRestart
+        global localRestart
+        global networkRestart
 
         self.gamevalue.lastX = 0
         self.gamevalue.gameState = GameState.WaitNewBlock
@@ -1125,7 +1129,11 @@ class GameManager:
         self.gamevalue.RANDOM_SEED = self.gamevalue.random.randrange(0, sys.maxsize)
         self.gamevalue.random.seed(self.gamevalue.RANDOM_SEED)
         if self.gamevalue.remote:
-            synchronized = SynchronizeState.WaitBoth
+            synchronizedGameSetting =  SynchronizeState.Synchronized
+            synchronizedGameOver =  SynchronizeState.Synchronized
+            synchronizedRestart =  SynchronizeState.Synchronized
+            localRestart = False
+            networkRestart = False
 
         if gamemode is GameMode.Local:
             self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_MID
@@ -1138,15 +1146,15 @@ class GameManager:
     #게임 종료
     def gameEnd(self, force = False):
         global highScore
-        global synchronized
+        global synchronizedGameOver
 
         print("game end")
 
-        if not force and gamemode is GameMode.Network and not synchronized is SynchronizeState.FinishGameOver and not synchronized is SynchronizeState.WaitGameOver:
+        if not force and gamemode is GameMode.Network and not synchronizedGameOver is SynchronizeState.WaitSend:
             print("send packet")
             packet = Packet(PacketInOut.OUT, {"tick": self.tick}, PacketType.GAMEOVER)
             packet.sendTo()
-            synchronized = SynchronizeState.WaitGameOver
+            synchronizedGameOver = SynchronizeState.WaitSend
             return
 
         localGameValue.gameState = GameState.GameOver
@@ -1234,20 +1242,24 @@ class GameManager:
     #틱당 1회 실행됨
     def update(self):
         if appState is AppState.Run:
-            if self.gamevalue.remote and localGameValue.gameState is GameState.GameOver and gamemode is GameMode.Network and synchronized is SynchronizeState.WaitGameOver:
+            if self.gamevalue.remote and gamemode is GameMode.Network and synchronizedGameOver is SynchronizeState.WaitSend:
                 packet = Packet(PacketInOut.OUT, {"tick", self.tick}, PacketType.GAMEOVER)
                 packet.sendTo()
-
-            if self.gamevalue.remote and gamemode is GameMode.Network and (synchronized is SynchronizeState.WaitSend or synchronized is SynchronizeState.WaitBoth):
-                print(synchronized, self.gamevalue.remote)
+            if self.gamevalue.remote and gamemode is GameMode.Network and synchronizedRestart is SynchronizeState.WaitSend:
+                if localRestart:
+                    packet = Packet(PacketInOut.OUT, {}, PacketType.RESTART)
+                else:
+                    packet = Packet(PacketInOut.OUT, {}, PacketType.CANCEL_RESTART)
+                packet.sendTo()
+            if self.gamevalue.remote and gamemode is GameMode.Network and (synchronizedGameSetting is SynchronizeState.WaitSend or synchronizedGameSetting is SynchronizeState.WaitBoth):
                 packet = Packet(PacketInOut.OUT, {"seed": localGameValue.RANDOM_SEED}, PacketType.SYNCHRONIZE_GAME_SETTING)
                 packet.sendTo(address)
+            if synchronizedGameSetting is not SynchronizeState.Synchronized:
                 return
-            if gamemode is GameMode.Network and (synchronized is SynchronizeState.WaitReceived or synchronized is SynchronizeState.WaitBoth):
-                return
+
             self.tick += 1
 
-            if self.tick % TPS == 0 and gamemode is GameMode.Network and not self.gamevalue.remote and not self.gamevalue.gameState is GameState.GameOver:
+            if self.tick % TPS == 0 and gamemode is GameMode.Network and not self.gamevalue.remote and not localGameValue.gameState is GameState.GameOver:
                 self.synchronizedFallingSpeed()
             
             state = self.gamevalue.gameState
@@ -1272,7 +1284,11 @@ class GameManager:
     
     #패킷 처리
     def processPacket(self, packet):
-        global synchronized
+        global synchronizedGameSetting
+        global synchronizedGameOver
+        global synchronizedRestart
+        global localRestart
+        global networkRestart
 
         if packet.type is PacketType.INVALID:
             #오류 패킷
@@ -1332,7 +1348,7 @@ class GameManager:
                 decodedCells.append(tmp)
             self.gamevalue.score = _score
             self.gamevalue.combo = _combo
-            self.gamevalue.animations.clear()
+            #self.gamevalue.animations.clear()
             try:
                 self.gamevalue.cellLock.acquire()
                 self.gamevalue.cells = decodedCells
@@ -1350,9 +1366,10 @@ class GameManager:
 
             self.gamevalue.TICK_PER_CELL = speed
         elif packet.type is PacketType.SYNCHRONIZE_GAME_SETTING:
-            if synchronized is SynchronizeState.Finish or synchronized is SynchronizeState.WaitSend:
-                packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
-                packetOut.sendTo()
+            packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
+            packetOut.sendTo()
+
+            if synchronizedGameSetting is SynchronizeState.Synchronized or synchronizedGameSetting is SynchronizeState.WaitSend:
                 return
 
             #게임 설정 동기화
@@ -1361,38 +1378,49 @@ class GameManager:
             if not result:
                 return
             networkGameValue.RANDOM_SEED = seed
-            networkGameValue.random.seed(seed)
-            if synchronized is SynchronizeState.WaitBoth:
-                synchronized = SynchronizeState.WaitSend
-            elif synchronized is SynchronizeState.WaitReceived:
-                synchronized = SynchronizeState.Finish
-            print(synchronized)
-
-            packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
-            packetOut.sendTo()
+            if synchronizedGameSetting is SynchronizeState.WaitBoth:
+                synchronizedGameSetting = SynchronizeState.WaitSend
+            elif synchronizedGameSetting is SynchronizeState.WaitReceived:
+                synchronizedGameSetting = SynchronizeState.Synchronized
+            print(synchronizedGameSetting)
         elif packet.type is PacketType.FINISH_SYNCHRONIZING:
             #게임 설정 동기화 완료
-            if synchronized is SynchronizeState.WaitGameOver:
-                synchronized = SynchronizeState.Finish
+            if synchronizedGameOver is SynchronizeState.WaitSend:
+                synchronizedGameOver = SynchronizeState.Synchronized
                 manager.gameEnd(True)
-            elif synchronized is SynchronizeState.WaitBoth:
-                synchronized = SynchronizeState.WaitReceived
-            elif synchronized is SynchronizeState.WaitSend:
-                synchronized = SynchronizeState.Finish
-            print(synchronized)
+            if synchronizedGameSetting is SynchronizeState.WaitBoth:
+                synchronizedGameSetting = SynchronizeState.WaitReceived
+            elif synchronizedGameSetting is SynchronizeState.WaitSend:
+                synchronizedGameSetting = SynchronizeState.Synchronized
+            if synchronizedRestart is SynchronizeState.WaitSend:
+                synchronizedRestart = SynchronizeState.Synchronized
+                if localRestart == True and networkRestart == True and localGameValue.gameState is GameState.GameOver:
+                    manager.gameStart()
+                    networkManager.gameStart()
         elif packet.type is PacketType.GAMEOVER:
             #게임 종료
-            manager.gameEnd(True)
+            packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
+            packetOut.sendTo()
+
+            if not localGameValue.gameState is GameState.GameOver:
+                manager.gameEnd(True)
         elif packet.type is PacketType.RESTART:
             #다시하기
-            if synchronized is SynchronizeState.WaitRestart:
-                manager.gameStart()
-                networkManager.gameStart()
+            packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
+            packetOut.sendTo()
+            
+            if localRestart == False:
+                networkRestart = True
             else:
-                synchronized = SynchronizeState.FinishRestart
+                if localGameValue.gameState is GameState.GameOver:
+                    networkManager.gameStart()
+                    manager.gameStart()
         elif packet.type is PacketType.CANCEL_RESTART:
             #다시하기 취소
-            synchronized = SynchronizeState.Finish
+            packetOut = Packet(PacketInOut.OUT, {}, PacketType.FINISH_SYNCHRONIZING)
+            packetOut.sendTo()
+
+            networkRestart = False
 
 
     #다음 블럭 생성
@@ -1414,7 +1442,9 @@ class GameManager:
         global listener
         global networkThead
         global networkState
-        global synchronized
+        global synchronizedRestart
+        global localRestart
+        global networkRestart
         
         if self.gamevalue.remote:
             return
@@ -1532,19 +1562,12 @@ class GameManager:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
                     #게임 오버 - Restart
                     if gamemode is GameMode.Network:
-                        if synchronized is SynchronizeState.FinishRestart:
-                            packet = Packet(PacketInOut.OUT, {}, PacketType.RESTART)
-                            packet.sendTo()
-                            manager.gameStart()
-                            networkManager.gameStart()
-                        elif synchronized is SynchronizeState.WaitRestart:
-                            synchronized = SynchronizeState.Finish   
-                            packet = Packet(PacketInOut.OUT, {}, PacketType.CANCEL_RESTART)
-                            packet.sendTo()
+                        if localRestart == False:
+                            localRestart = True
+                            synchronizedRestart = SynchronizeState.WaitSend
                         else:
-                            synchronized = SynchronizeState.WaitRestart
-                            packet = Packet(PacketInOut.OUT, {}, PacketType.RESTART)
-                            packet.sendTo()
+                            localRestart = False
+                            synchronizedRestart = SynchronizeState.WaitSend
                     else:
                         self.gameReset()
                         self.gameStart()
@@ -1675,11 +1698,11 @@ class GameManager:
                 
                 displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
-                if synchronized is SynchronizeState.WaitRestart:
+                if localRestart:
                     displayInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
                     displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                if not synchronized is SynchronizeState.WaitRestart:
+                if not localRestart:
                     displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif localGameValue.gameState is GameState.Paused:
                 #정지 메뉴
