@@ -7,8 +7,8 @@ import socket
 from enum import Enum
 
 #실행 플레그
-PRINT_DEBUG_LOG = True
-RANDOM_IGNORE_PACKET = False
+FLAG_PRINT_DEBUG_LOG = True
+FLAG_RANDOM_IGNORE_PACKET = False
 
 #화면 설정
 SCREEN_WIDTH = 600
@@ -172,6 +172,12 @@ class IngameValue():
         self.blockID = 0
         self.RANDOM_SEED = 0
         self.random = random.Random()
+
+    def changeState(self, state):
+        if gamemode is GameMode.Network and self.gameState is GameState.Paused:
+            self.prePauseState = state
+        else:
+            self.gameState = state
 localGameValue = IngameValue()
 localGameValue.remote = False
 
@@ -209,7 +215,7 @@ synchronizedRestart = SynchronizeState.Synchronized
 #선정의 메소드
 
 def debugLog(*message):
-    if PRINT_DEBUG_LOG:
+    if FLAG_PRINT_DEBUG_LOG:
         print(*message)
 
 def randomBit(ran):    #랜덤으로 -1 또는 1을 반환
@@ -347,7 +353,7 @@ class Animation:
 
         if not self.gamevalue.gameState is GameState.Animating:
             self.gamevalue.preAnimaionState = self.gamevalue.gameState
-            self.gamevalue.gameState = GameState.Animating
+            self.gamevalue.changeState(GameState.Animating)
 
     def update(self):
         self.tick += 1
@@ -523,7 +529,7 @@ class Packet():
         global netSocket
 
         #패킷 복구 확인용 패킷 씹기
-        if RANDOM_IGNORE_PACKET and not networkState is NetworkState.Connected and random.randint(0,2) == 0:
+        if FLAG_RANDOM_IGNORE_PACKET and not networkState is NetworkState.Connected and random.randint(0,2) == 0:
             return
 
         if netSocket is None or not self.valid:
@@ -963,7 +969,7 @@ class Block:
         
         #다음 블럭 요청
         self.gamevalue.lastX = self.x
-        self.gamevalue.gameState = GameState.WaitNewBlock
+        self.gamevalue.changeState(GameState.WaitNewBlock)
         self.gamevalue.curBlock = None
         self.gamevalue.fakeBlock = None
 
@@ -1080,7 +1086,7 @@ class GameManager:
         global synchronizedGameSetting
 
         self.gameReset()
-        self.gamevalue.gameState = GameState.WaitNewBlock
+        self.gamevalue.changeState(GameState.WaitNewBlock)
         if not self.gamevalue.remote:
             appState = AppState.Run
         if gamemode is GameMode.Network:
@@ -1095,7 +1101,7 @@ class GameManager:
         global networkRestart
 
         self.gamevalue.lastX = 0
-        self.gamevalue.gameState = GameState.WaitNewBlock
+        self.gamevalue.changeState(GameState.WaitNewBlock)
         self.tick = 0
         self.gamevalue.curBlock = None
         self.gamevalue.score = 0
@@ -1194,7 +1200,7 @@ class GameManager:
             return
         
         #Pause 검사
-        if gamemode is GameMode.Local and keyCode == KEY_PAUSE:
+        if keyCode == KEY_PAUSE:
             if not self.gamevalue.gameState is GameState.GameOver:
                 if self.gamevalue.gameState is GameState.Paused:
                     #다시 누르면 Pause 해제
@@ -1245,6 +1251,8 @@ class GameManager:
                 self.synchronizedFallingSpeed()
             
             state = self.gamevalue.gameState
+            if gamemode is GameMode.Network and self.gamevalue.gameState is GameState.Paused:
+                state = self.gamevalue.prePauseState
 
             #GameState별 처리
             if state is GameState.WaitNewBlock:
@@ -1259,7 +1267,7 @@ class GameManager:
                     if self.gamevalue.gameState is GameState.Paused and gamemode is GameMode.Network:
                         self.gamevalue.prePauseState = self.gamevalue.preAnimaionState
                     else:
-                        self.gamevalue.gameState = self.gamevalue.preAnimaionState
+                        self.gamevalue.changeState(self.gamevalue.preAnimaionState)
                 #애니매이션 재생
                 for animation in self.gamevalue.animations:
                     animation.update()
@@ -1414,7 +1422,7 @@ class GameManager:
                          color = ALL_BLOCK_COLORS[self.gamevalue.random.randint(0, len(ALL_BLOCK_COLORS) - 1)],
                          dirZ = randomBit(self.gamevalue.random), dirX = randomBit(self.gamevalue.random), dirY = randomBit(self.gamevalue.random), x = self.gamevalue.lastX)
         self.gamevalue.blockID = id + 1
-        self.gamevalue.gameState = GameState.Drop
+        self.gamevalue.changeState(GameState.Drop)
 
     #마우스 클릭시 
     def mouseUp(self):
@@ -1565,12 +1573,18 @@ class GameManager:
                     localGameValue.gameState = localGameValue.prePauseState
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40):
                     #정지 메뉴 - Restart
+                    if gamemode is GameMode.Network:
+                        return
+
                     self.gameEnd()
                     self.gameReset()
                     self.gameStart()
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40):
                     #정지 메뉴 - Back To Menu
-                    self.gameEnd()
+                    if gamemode is GameMode.Network:
+                        closeRoom()
+                    else:
+                        self.gameEnd()
                     menuState = MenuState.Main
                     appState = AppState.Menu
      
@@ -1693,12 +1707,14 @@ class GameManager:
                 displayTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
                 displayInterectibleTextRect(pos, "Continue", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if gamemode is GameMode.Local:
+                    displayInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 displayInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             else:
                 #게임 중
                 if gamemode is GameMode.Network:
-                    displayText(str(self.gamevalue.score), self.gamevalue.GAME_SCREEN_OFFSET[0] + 250, 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    displayText(str(localGameValue.score), 250, 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    displayText(str(networkGameValue.score), 550, 50, color = (255, 255, 255), font = "hancommalangmalang")
                 else:
                     displayText(str(localGameValue.score), 500, 50, color = (255, 255, 255), font = "hancommalangmalang")
         
