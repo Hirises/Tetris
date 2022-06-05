@@ -226,7 +226,7 @@ def errorLog(type, message, *content):
     for index in range(0, len(content)):
         if index % 2 == 0:
             continue
-        additionalContent += content[index - 1] + ": " + content[index] + ", "
+        additionalContent += str(content[index - 1]) + ": " + str(content[index]) + ", "
     if len(additionalContent) > 0:
         additionalContent = additionalContent[0:-2]
     debugLog("[" + type + "] " + message + "   " + additionalContent)
@@ -454,12 +454,13 @@ class Packet():
                 splitedData = realData.split("&")
             else:
                 splitedData = [realData]
-            for atomicData in splitedData:
-                splitedAtomicData = atomicData.split("?")
-                if len(splitedAtomicData) != 2:
-                    errorLog("except 104", "유효하지 않은 패킷 구조입니다", "target data", splitedAtomicData, "full data", _data)
-                    continue
-                decodedData[splitedAtomicData[0]] = splitedAtomicData[1]
+            if len(realData) > 0:
+                for atomicData in splitedData:
+                    splitedAtomicData = atomicData.split("?")
+                    if len(splitedAtomicData) != 2:
+                        errorLog("except 104", "유효하지 않은 패킷 구조입니다", "target data", splitedAtomicData, "full data", _data)
+                        continue
+                    decodedData[splitedAtomicData[0]] = splitedAtomicData[1]
 
             self.data = decodedData
             self.valid = True
@@ -566,6 +567,8 @@ def createRoom():
     networkState = NetworkState.Disconnected
     address = None
 
+    debugLog("socket is opend")
+
 #방 제거
 def closeRoom(deep = 1):
     global netSocket
@@ -616,6 +619,7 @@ def closeRoom(deep = 1):
     address = None
     netSocket = None
     networkThead = None
+    debugLog("socket is closed")
 
 #접속 대기
 def waitEnter():
@@ -641,6 +645,8 @@ def waitEnter():
         closeRoom()
         return
     
+    debugLog("socket is binded at port " + displayObjects["port"].getContent())
+
     try:
         (rawData, _address) = netSocket.recvfrom(1024)
         data = rawData.decode()
@@ -678,6 +684,7 @@ def waitEnter():
 
     address = _address
     networkState = NetworkState.Connected
+    debugLog("successfully connected with client from " + address[0] + ":" + str(address[1]))
     try:
         packetPoolLock.acquire()
         packetPool = []
@@ -708,6 +715,8 @@ def enterRoom(_ip, _port):
     packet = Packet(PacketInOut.Out, {"ver" : GAME_VERSION}, PacketType.AccessRequire)
     packet.sendTo((_ip, _port))
 
+    debugLog("send packet to server. wait respond")
+
     data = None
     try:
         #서버측 응답 대기
@@ -731,6 +740,7 @@ def enterRoom(_ip, _port):
 
     address = _address
     networkState = NetworkState.Connected
+    debugLog("successfully connected with server from " + address[0] + ":" + str(address[1]))
     try:
         packetPoolLock.acquire()
         packetPool = []
@@ -746,6 +756,7 @@ def enterRoom(_ip, _port):
 
 #무한 반복 패킷 수신 처리기
 def runPacketListener():
+    debugLog("start listening packet")
     while(True):
         #접속 종료 처리
         if netSocket is None:
