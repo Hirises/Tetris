@@ -18,6 +18,15 @@ FLAG_PRINT_DEBUG_LOG = True     #디버깅 메세지 출력
 FLAG_RANDOM_IGNORE_PACKET = False   #의도적으로 패킷 손실시키기
 
 #화면 설정
+SCREEN_RESOLUTION = 1         #화면 해상도
+PRE_SCREEN_RESOLUTION = 1
+RESET_DELAY_SEC = 10                #해상도 설정 초기화 대기 시간(초)
+SCREEN_RESOLUTIONS = [
+                        1,      #600 X 400
+                        1.5,    #900 X 600
+                        2,      #1200 X 800
+                        3       #1800 X 1200
+                     ]      
 SCREEN_WIDTH = 600
 SCREEN_HEIGTH = 400
 TPS = 30
@@ -42,9 +51,9 @@ class MenuState(Enum):  #메뉴 위치
     GameMode = 1
     CreateRoom = 2
     EnterRoom = 3
-    Setting = 4
+    Options = 4
     KeySetting = 5
-    NewWorkSetting = 6
+    Settings = 6
     Help = 7
 class GameMode(Enum):   #게임 모드
     Local = 0
@@ -157,6 +166,7 @@ localManager = None
 remoteManager = None
 keyInputListener = None     #키 커스텀 용도
 displayObjects = {}         #텍스트 필드 등 UI 오브젝트
+displaySettingResetTick = -1      #해상도 설정 리셋 틱
 
 #인게임 변수 (클래스로 묶어서 관리)
 class IngameValue():
@@ -216,6 +226,16 @@ synchronizedRestart = SynchronizeState.Synchronized     #재시작 동의 상태
 #--- 선정의 멤버 영역 ------------------------------------------------------------------------------------------------------------------------------------------------
         
 #--- 디스플레이 멤버
+
+#화면 해상도 적용
+def applyScreenResolution():
+    global screen
+
+    screen = pygame.display.set_mode((resize(SCREEN_WIDTH), resize(SCREEN_HEIGTH)))
+
+#해상도 반영
+def resize(value):
+    return int(value * SCREEN_RESOLUTION)
 
 #마우스 위치 검출
 def isCollideIn(pos, x, y, dx, dy):
@@ -330,7 +350,7 @@ class TextField:
 class AlertContainer:    
     def __init__(self, content = [""], backgroundColor = (200, 200, 200), fontColor = (0, 0, 0), font = "arial", size =30,
                  buttonFont = "arial", buttonFontSize = 30, buttonColor = (255, 255, 255), buttonbackgroundColor = (50, 50, 50),
-                 buttonHighlightColor = (255, 255, 255), buttonHighlightBackgroundColor = (100, 100, 100)):
+                 buttonHighlightColor = (255, 255, 255), buttonHighlightBackgroundColor = (100, 100, 100), closeFunction = None):
         self.enable = True
         self.content = content
         self.backgroundColor = backgroundColor
@@ -343,6 +363,7 @@ class AlertContainer:
         self.buttonBackgroundColor = buttonbackgroundColor
         self.buttonHighlightColor = buttonHighlightColor
         self.buttonHighlightBackgroundColor = buttonHighlightBackgroundColor
+        self.closeFunction = closeFunction
     
     #화면에 출력
     def draw(self):
@@ -365,6 +386,8 @@ class AlertContainer:
 
         if isCollideIn(pos, 300, 325 - (self.buttonFontSize + 5) / 2 - 10, 100, (self.buttonFontSize + 5)):
             self.enable = False
+            if not self.closeFunction is None:
+                self.closeFunction()
 
     #키 입력 처리
     def keyDown(self, keyCode):
@@ -389,8 +412,8 @@ def errorLog(type, message, *content):
     debugLog("[" + type + "] " + message + "   " + additionalContent)
 
 #알림 창 출력
-def alertLog(*content):
-    displayObjects["alert"] = AlertContainer(list(content), font = "hancommalangmalang", buttonFont = "hancommalangmalang", size = 40, buttonFontSize = 25)
+def alertLog(*content, closeFunction = None):
+    displayObjects["alert"] = AlertContainer(list(content), font = "hancommalangmalang", buttonFont = "hancommalangmalang", size = 40, buttonFontSize = 25, closeFunction = closeFunction)
 
 #랜덤으로 -1 또는 1을 반환 (블럭 회전값 랜덤 적용시 사용)
 def randomBit(ran):    
@@ -451,12 +474,18 @@ def setPauseKey(keyCode):
 #텍스트 필드 디스플레이 조건 지원 용도
 def whenNetworkSetting():
     global menuState
-    return menuState is MenuState.NewWorkSetting
+    return menuState is MenuState.Settings
 def whenIpInputing():
     global menuState
     global networkState
     return menuState is MenuState.EnterRoom and networkState is NetworkState.Disconnected
 
+#해상도 초기화 지원용도
+def setResetDelayTick():
+    global displaySettingResetTick
+    global PRE_SCREEN_RESOLUTION
+    displaySettingResetTick = -1
+    PRE_SCREEN_RESOLUTION = SCREEN_RESOLUTION
 
 #--- 네트워킹 멤버
 
@@ -1277,12 +1306,12 @@ class GameManager:
         self.gamevalue.blockID = 0
         self.gamevalue.RANDOM_SEED = self.gamevalue.random.randrange(0, sys.maxsize)
         self.gamevalue.random.seed(self.gamevalue.RANDOM_SEED)
+        localRestart = False
+        remoteRestart = False
         if self.gamevalue.isRemote: #동기화 상태 초기화
             synchronizedGameSetting =  SynchronizeState.Synchronized
             synchronizedGameOver =  SynchronizeState.Synchronized
             synchronizedRestart =  SynchronizeState.Synchronized
-            localRestart = False
-            remoteRestart = False
         if gamemode is GameMode.Local:  #화면 Offset 설정
             self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_MID
         elif gamemode is GameMode.Network:
@@ -1318,11 +1347,25 @@ class GameManager:
 
     #틱당 1회 실행되는 메인 로직 함수
     def update(self):
+        global displaySettingResetTick
+        global PRE_SCREEN_RESOLUTION
+        global SCREEN_RESOLUTION
+
+        #해상도 초기화
+        if displaySettingResetTick > 0:
+            displaySettingResetTick -= 1
+            alertLog("Display setting will be", "reseted after " + str(displaySettingResetTick // TPS + 1) + " seconds", "close this alert to remain", closeFunction = setResetDelayTick)
+        elif displaySettingResetTick == 0:
+            displaySettingResetTick = -1
+            SCREEN_RESOLUTION = PRE_SCREEN_RESOLUTION
+            applyScreenResolution()
+            displayObjects["alert"].enable = False
+
         if appState is AppState.Game:
             #동기화 실행
             if self.gamevalue.isRemote and gamemode is GameMode.Network and synchronizedGameOver is SynchronizeState.WaitSend:
                 #게임 오버 동기화
-                packet = Packet(PacketInOut.Out, {"tick", self.tick}, PacketType.SynchronizeGameOver)
+                packet = Packet(PacketInOut.Out, {"tick": self.tick}, PacketType.SynchronizeGameOver)
                 packet.sendTo()
             if self.gamevalue.isRemote and gamemode is GameMode.Network and synchronizedRestart is SynchronizeState.WaitSend:
                 #재시작 동기화
@@ -1509,6 +1552,9 @@ class GameManager:
             packetOut = Packet(PacketInOut.Out, {}, PacketType.Synchronized)
             packetOut.sendTo()
             
+            if not localGameValue.gameState is GameState.GameOver:
+                return
+
             if localRestart == False:
                 remoteRestart = True
             else:
@@ -1519,6 +1565,9 @@ class GameManager:
             #다시하기 취소
             packetOut = Packet(PacketInOut.Out, {}, PacketType.Synchronized)
             packetOut.sendTo()
+
+            if not localGameValue.gameState is GameState.GameOver:
+                    return
 
             remoteRestart = False
         elif packet.type is PacketType.Disconnect:
@@ -1626,6 +1675,10 @@ class GameManager:
         global synchronizedRestart
         global localRestart
         global remoteRestart
+        global PRE_SCREEN_RESOLUTION
+        global SCREEN_RESOLUTION
+        global displaySettingResetTick
+        global screen
         
         if self.gamevalue.isRemote:
             return
@@ -1642,7 +1695,7 @@ class GameManager:
                     menuState = MenuState.GameMode
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40):
                     #메인 메뉴 - Settings
-                    menuState = MenuState.Setting
+                    menuState = MenuState.Options
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #메인 메뉴 - Quit
                     pygame.quit()
@@ -1671,13 +1724,13 @@ class GameManager:
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #세팅 - Quit
                     menuState = MenuState.Main
-            elif menuState is MenuState.Setting:
+            elif menuState is MenuState.Options:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, 170, 200, 40):
                     #세팅 - Key Setting
                     menuState = MenuState.KeySetting
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, 220, 200, 40):
                     #세팅 - NewWork
-                    menuState = MenuState.NewWorkSetting
+                    menuState = MenuState.Settings
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, 270, 200, 40):
                     #세팅 - Help
                     menuState = MenuState.Help
@@ -1705,15 +1758,28 @@ class GameManager:
                     keyInputListener = lambda keyCode : setPauseKey(keyCode)
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #키 세팅 - Quit
-                    menuState = MenuState.Setting
+                    menuState = MenuState.Options
             elif menuState == MenuState.Help:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #도움말 - Quit
-                    menuState = MenuState.Setting
-            elif menuState == MenuState.NewWorkSetting:
-                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
-                    #네트워크 설정 - Quit
-                    menuState = MenuState.Setting
+                    menuState = MenuState.Options
+            elif menuState == MenuState.Settings:
+                if isCollideIn(pos, SCREEN_WIDTH / 2 + 125, 90, 200, 50):
+                    #일반 설정 - Resolution
+                    curIndex = SCREEN_RESOLUTIONS.index(PRE_SCREEN_RESOLUTION)
+                    if curIndex + 1 >= len(SCREEN_RESOLUTIONS):
+                        PRE_SCREEN_RESOLUTION = SCREEN_RESOLUTIONS[0]
+                    else:
+                        PRE_SCREEN_RESOLUTION = SCREEN_RESOLUTIONS[curIndex + 1]
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
+                    #일반 설정 - Quit / Apply
+                    if SCREEN_RESOLUTION != PRE_SCREEN_RESOLUTION:
+                        #Apply
+                        (SCREEN_RESOLUTION, PRE_SCREEN_RESOLUTION) = (PRE_SCREEN_RESOLUTION, SCREEN_RESOLUTION)
+                        displaySettingResetTick = RESET_DELAY_SEC * TPS
+                        applyScreenResolution()
+                    #Quit
+                    menuState = MenuState.Options
             elif menuState == MenuState.CreateRoom:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     if not networkState is NetworkState.Connected:
@@ -1874,8 +1940,8 @@ class GameManager:
                 drawText("highScore " + str(highScore), SCREEN_WIDTH / 2, 150, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
 
                 drawInterectibleTextRect(pos, "New Game", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 150, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                drawInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Options", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 100, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Exit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.GameMode:
                 #게임 모드 설정
                 drawInterectibleTextRect(pos, "Sole", SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140, size = 80, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
@@ -1908,22 +1974,25 @@ class GameManager:
                 
 
                 drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-            elif menuState is MenuState.Setting:
+            elif menuState is MenuState.Options:
                 #설정
                 drawText("Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 
                 drawInterectibleTextRect(pos, "Key Setting", SCREEN_WIDTH / 2, 170, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                drawInterectibleTextRect(pos, "NetWork", SCREEN_WIDTH / 2, 220, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Settings", SCREEN_WIDTH / 2, 220, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 drawInterectibleTextRect(pos, "Help", SCREEN_WIDTH / 2, 270, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 
                 drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-            elif menuState is MenuState.NewWorkSetting:
-                #네트워크 설정
-                drawText("Network Settings", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
-
+            elif menuState is MenuState.Settings:
+                #일반 설정
                 drawText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawText("Resolution", SCREEN_WIDTH / 2 - 100, 90, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, str(int(SCREEN_WIDTH * PRE_SCREEN_RESOLUTION)) + " X " + str(int(SCREEN_HEIGTH * PRE_SCREEN_RESOLUTION)), SCREEN_WIDTH / 2 + 125, 90, 200, 50, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
-                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if PRE_SCREEN_RESOLUTION != SCREEN_RESOLUTION:
+                    drawInterectibleTextRect(pos, "Apply", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                else:
+                    drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
                 #방 생성
                 if networkState is NetworkState.Disconnected:
