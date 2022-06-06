@@ -16,6 +16,7 @@ GAME_VERSION = 1
 #실행 플레그
 FLAG_PRINT_DEBUG_LOG = True     #디버깅 메세지 출력
 FLAG_RANDOM_IGNORE_PACKET = False   #의도적으로 패킷 손실시키기
+FLAG_PACKET_IGNORE_RATE = 3     #패킷 손실률
 
 #화면 설정
 SCREEN_RESOLUTION = 1         #화면 해상도
@@ -613,7 +614,7 @@ class Packet():
         global netSocket
 
         #패킷 복구 확인용 패킷 씹기
-        if FLAG_RANDOM_IGNORE_PACKET and random.randint(0,2) == 0:
+        if FLAG_RANDOM_IGNORE_PACKET and random.randint(0, FLAG_PACKET_IGNORE_RATE - 1) == 0:
             debugLog(">//", self.type, self.data)
             return
 
