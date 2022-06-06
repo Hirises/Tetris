@@ -233,36 +233,40 @@ def applyScreenResolution():
 
     screen = pygame.display.set_mode((resize(SCREEN_WIDTH), resize(SCREEN_HEIGTH)))
 
-#해상도 반영
+#해상도 반영 (상수)
 def resize(value):
     return int(value * SCREEN_RESOLUTION)
+
+#해상도 반영 (튜플)
+def resizeAll(*value):
+    return tuple(int(SCREEN_RESOLUTION * element) for element in value)
 
 #마우스 위치 검출
 def isCollideIn(pos, x, y, dx, dy):
     posX = pos[0]
     posY = pos[1]
-    leftX = x - dx / 2
-    rightX = x + dx / 2
-    upY = y + dy / 2
-    downY = y - dy / 2
+    leftX = resize(x - dx / 2)
+    rightX = resize(x + dx / 2)
+    upY = resize(y + dy / 2)
+    downY = resize(y - dy / 2)
     
     return posX >= leftX and posX <= rightX and posY >= downY and posY <= upY
 
 #화면에 글자 출력
 def drawText(string, x, y, size = 40, font = "arial", color = (0, 0, 0)): 
-    font = pygame.font.SysFont(font, size)
+    font = pygame.font.SysFont(font, resize(size))
     text = font.render(string, True, color)
     rect = text.get_rect()
-    rect.center = (x, y)
+    rect.center = resizeAll(x, y)
     screen.blit(text, rect)
 
 #화면에 글자 + 사각형 배경 출력
 def drawTextRect(string, x, y, dx, dy = 40, size = 40, font = "arial", color = (0, 0, 0), backgroundColor = (255, 255, 255)): 
-    pygame.draw.rect(screen, backgroundColor, (x - dx / 2, y - dy / 2, dx, dy))
-    font = pygame.font.SysFont(font, size)
+    pygame.draw.rect(screen, backgroundColor, resizeAll(x - dx / 2, y - dy / 2, dx, dy))
+    font = pygame.font.SysFont(font, resize(size))
     text = font.render(string, True, color)
     rect = text.get_rect()
-    rect.center = (x, y)
+    rect.center = resizeAll(x, y)
     screen.blit(text, rect)
     
 #마우스에 반응하는 글자 + 사각형 배경 출력
@@ -370,7 +374,7 @@ class AlertContainer:
         if not self.enable:
             return
 
-        pygame.draw.rect(screen, self.backgroundColor, (100, 75, 400, 250))
+        pygame.draw.rect(screen, self.backgroundColor, resizeAll(100, 75, 400, 250))
         index = 1
         for string in self.content:
             drawText(string, 300, 75 + self.size * index, self.size, self.font, self.color)
@@ -1007,6 +1011,7 @@ class Block:
         dirX = self.dirX
         dirY = self.dirY
         y = self.y
+        x = self.x
         
         #미리 돌려보기
         dirZ *= -1
@@ -1017,8 +1022,17 @@ class Block:
         state = self.getState(dirZ, dirX, dirY)
         y -=  len(state[0]) - len(self.curState[0])
             
+        #오른쪽 벽에서는 미끄러지듯 회전
+        isCollide = True
+        for i in range(0, len(state)):
+            if self.isColideWith(state, x, y):
+                x -= 1
+                continue
+            isCollide = False
+            break
+
         #충돌하면 취소
-        if self.isColideWith(state, self.x, self.y):
+        if isCollide:
             return
             
         #결과 적용
@@ -1027,6 +1041,7 @@ class Block:
         self.dirX = dirX
         self.dirY = dirY
         self.y = y
+        self.x = x
 
         #반영
         self.applyFakeBlock()
@@ -1039,6 +1054,7 @@ class Block:
         dirX = self.dirX
         dirY = self.dirY
         y = self.y
+        x = self.x
         
         #미리 돌려보기
         dirZ *= -1
@@ -1048,9 +1064,18 @@ class Block:
             dirX *= -1
         state = self.getState(dirZ, dirX, dirY)
         y -=  len(state[0]) - len(self.curState[0])
-            
+
+        #오른쪽 벽에서는 미끄러지듯 회전
+        isCollide = True
+        for i in range(0, len(state)):
+            if self.isColideWith(state, x, y):
+                x -= 1
+                continue
+            isCollide = False
+            break
+
         #충돌하면 취소
-        if self.isColideWith(state, self.x, y):
+        if isCollide:
             return
         
         #결과 적용
@@ -1059,6 +1084,7 @@ class Block:
         self.dirX = dirX
         self.dirY = dirY
         self.y = y
+        self.x = x
 
         #반영
         self.applyFakeBlock()
@@ -1859,7 +1885,7 @@ class GameManager:
         if appState is AppState.Game:
             #배경
             pygame.draw.rect(screen, GAME_SCREEN_COLOR, 
-                             (self.gamevalue.GAME_SCREEN_OFFSET[0], self.gamevalue.GAME_SCREEN_OFFSET[1], 
+                             resizeAll(self.gamevalue.GAME_SCREEN_OFFSET[0], self.gamevalue.GAME_SCREEN_OFFSET[1], 
                               CELL_SIZE * HORIZONTAL_CELL_COUNT, 
                               CELL_SIZE * VERTICAL_CELL_COUNT))
             
@@ -1875,12 +1901,12 @@ class GameManager:
                             
                     if self.gamevalue.cells[x][y].state is CellState.Empty:
                         pygame.draw.rect(screen, EMPTY_CELL_COLOR, 
-                                         (CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0], 
+                                         resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0], 
                                           CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
                                           CELL_SIZE - offsetX, CELL_SIZE - offsetY))
                     else:
                         pygame.draw.rect(screen, self.gamevalue.cells[x][y].color, 
-                                         (CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0],
+                                         resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0],
                                           CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
                                           CELL_SIZE - offsetX, CELL_SIZE - offsetY))
             
@@ -1901,7 +1927,7 @@ class GameManager:
                         
                         if state[x - self.gamevalue.fakeBlock.x][y - self.gamevalue.fakeBlock.y] is CellState.Occupied:
                             pygame.draw.rect(screen, FAKE_BLOCK_COLOR, 
-                                             (CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0], 
+                                             resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0], 
                                               CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
                                               CELL_SIZE - offsetX, CELL_SIZE - offsetY))
             
@@ -1922,7 +1948,7 @@ class GameManager:
                         
                         if state[x - self.gamevalue.curBlock.x][y - self.gamevalue.curBlock.y] is CellState.Occupied:
                             pygame.draw.rect(screen, self.gamevalue.curBlock.color, 
-                                             (CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0], 
+                                             resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0], 
                                               CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
                                               CELL_SIZE - offsetX, CELL_SIZE - offsetY))
 
