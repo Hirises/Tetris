@@ -56,9 +56,12 @@ class MenuState(Enum):  #메뉴 위치
     KeySetting = 5
     Settings = 6
     Help = 7
-class GameMode(Enum):   #게임 모드
+class GameType(Enum):   #게임 환경
     Local = 0
     Network = 1
+class GameMode(Enum):   #게임 모드
+    Classic = 0
+    Fusion = 1
 
 #셀 설정
 HORIZONTAL_CELL_COUNT = 10
@@ -69,6 +72,12 @@ EMPTY_CELL_COLOR = (0, 0, 0)
 class CellState(Enum):
     Empty = 0
     Occupied = 1
+class CellEffect(Enum):
+    Default = 0
+    Confusion = 1
+    Blindness = 2
+    SpeedUp = 3
+CELL_EFFECT_RATE = [97, 1, 1, 1]    #CellEffect Enum 순서와 같다
 
 #블럭 설정
 DEFAULT_TICK_PER_CELL = 10      #블럭이 1칸 떨어지는데 걸리는 틱 수
@@ -131,24 +140,26 @@ class PacketType(Enum):
     BlockMove = 5      #블럭 이동
     BlockLanding = 6   #블럭 고정
     ChangeTickPerCell = 7          #블럭 떨어지는 속도 변경
-    SynchronizeGameOver = 8        #게임 오버
-    SynchronizeRestart = 9         #다시 시작
-    SynchronizeCancelRestart = 10  #다시 시작 취소
-    Disconnect = 11    #접속 해제
+    ApplyEffect = 8    #효과 적용
+    SynchronizeGameOver = 9        #게임 오버
+    SynchronizeRestart = 10         #다시 시작
+    SynchronizeCancelRestart = 11  #다시 시작 취소
+    Disconnect = 12    #접속 해제
 PACKET_IDENTIFIERS = {}   #패킷 식별자
 PACKET_IDENTIFIERS[PacketType.Invalid] = "INVL"
 PACKET_IDENTIFIERS[PacketType.AccessRequire] = "ACRQ"
 PACKET_IDENTIFIERS[PacketType.AccessAccept] = "ACOK"
 PACKET_IDENTIFIERS[PacketType.AccessDeny] = "ACNO"
-PACKET_IDENTIFIERS[PacketType.Disconnect] = "QUIT"
-PACKET_IDENTIFIERS[PacketType.BlockMove] = "BKMV"
-PACKET_IDENTIFIERS[PacketType.BlockLanding] = "BKLD"
-PACKET_IDENTIFIERS[PacketType.SynchronizeGameOver] = "GAEN"
-PACKET_IDENTIFIERS[PacketType.SynchronizeRestart] = "REST"
-PACKET_IDENTIFIERS[PacketType.ChangeTickPerCell] = "CTPC"
 PACKET_IDENTIFIERS[PacketType.SynchronizeGameSetting] = "SYGS"
 PACKET_IDENTIFIERS[PacketType.Synchronized] = "SYFH"
+PACKET_IDENTIFIERS[PacketType.BlockMove] = "BKMV"
+PACKET_IDENTIFIERS[PacketType.BlockLanding] = "BKLD"
+PACKET_IDENTIFIERS[PacketType.ChangeTickPerCell] = "CTPC"
+PACKET_IDENTIFIERS[PacketType.ApplyEffect] = "APFX"
+PACKET_IDENTIFIERS[PacketType.SynchronizeGameOver] = "GAEN"
+PACKET_IDENTIFIERS[PacketType.SynchronizeRestart] = "REST"
 PACKET_IDENTIFIERS[PacketType.SynchronizeCancelRestart] = "CNRT"
+PACKET_IDENTIFIERS[PacketType.Disconnect] = "QUIT"
 
 # --- 변수 영역 ------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -160,7 +171,8 @@ clock = pygame.time.Clock()
 #글로벌 변수
 appState = AppState.Menu
 menuState = MenuState.Main
-gamemode = GameMode.Local
+gameType = GameType.Local
+gameMode = GameMode.Classic
 pressedKey = {}             #현재 눌려져 있는 키 (커스텀 키 입력 구현 용도)
 highScore = 0
 localManager = None
@@ -193,7 +205,7 @@ class IngameValue():
 
     #gameState 변경
     def changeState(self, state):
-        if gamemode is GameMode.Network and self.gameState is GameState.Paused:
+        if gameType is GameType.Network and self.gameState is GameState.Paused:
             #멈춤 상태면 prePauseState에 반영 (게임 모드가 Network인 경우에만)
             self.prePauseState = state
         else:
@@ -204,8 +216,9 @@ localGameValue.isRemote = False
 #네트워킹 변수
 netSocket = None     #소켓
 address = None      #주소
+
 networkState = NetworkState.Disconnected    #현재 네드워크 상태
-networkThead = None        #네트워킹 담당 쓰레드
+networkThread = None        #네트워킹 담당 쓰레드
 packetPool = None          #패킷 풀
 returnedPackets = None     #반환된 패킷
 packetPoolLock = threading.Lock()   #패킷 풀 락
@@ -660,7 +673,7 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
     global netSocket
     global networkState
     global address
-    global networkThead
+    global networkThread
     global packetPool
     global returnedPackets
     global appState
@@ -671,7 +684,7 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
         errorLog("exception 211", "Stack Over Flow")
         return
 
-    if gamemode is GameMode.Network:
+    if gameType is GameType.Network:
         if not localGameValue.gameState is GameState.GameOver and appState == AppState.Game:
             localManager.gameEnd(True)
         if not stay:
@@ -706,7 +719,7 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
     networkState = NetworkState.Disconnected
     address = None
     netSocket = None
-    networkThead = None
+    networkThread = None
     debugLog("socket is closed")
     if useAlert:
         alertLog("Connection is Closed")
@@ -718,7 +731,7 @@ def waitEnter():
     global address
     global packetPool
     global returnedPackets
-    global gamemode
+    global gameType
 
     if netSocket is None:
         createRoom()
@@ -745,6 +758,8 @@ def waitEnter():
         errorLog("exception 222", "클라이언트로부터 패킷 수신에 실패하엿습니다", "socket", netSocket)
         debugLog(type(e), e)
         closeRoom(useAlert = False, stay = True)
+        if networkState is NetworkState.Disconnected:
+            return
         waitEnter()
         return
 
@@ -785,7 +800,7 @@ def waitEnter():
         returnedPackets = []
     finally:
         packetPoolLock.release()
-    gamemode = GameMode.Network
+    gameType = GameType.Network
 
     t = threading.Thread(target=runPacketListener, daemon=True)
     t.start()
@@ -799,7 +814,7 @@ def enterRoom(_ip, _port):
     global address
     global packetPool
     global returnedPackets
-    global gamemode
+    global gameType
 
     if netSocket is None:
         createRoom()
@@ -843,7 +858,7 @@ def enterRoom(_ip, _port):
         returnedPackets = []
     finally:
         packetPoolLock.release()
-    gamemode = GameMode.Network
+    gameType = GameType.Network
 
     t = threading.Thread(target=runPacketListener, daemon=True)
     t.start()
@@ -946,9 +961,10 @@ def hasNextPacket():
 
 #셀 하나하나의 상태
 class Cell:
-    def __init__(self, state = CellState.Empty, color = (255, 0, 0)):
+    def __init__(self, state = CellState.Empty, color = (255, 0, 0), effect = CellEffect.Default):
         self.state = state
         self.color = color
+        self.effect = effect
         
     def changeState(self, state, color):
         self.state = state
@@ -1003,7 +1019,7 @@ class Block:
 
         #반영
         self.applyFakeBlock()
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote:
+        if gameType is GameType.Network and not self.gamevalue.isRemote:
             self.synchronizePosition()
 
     #좌측 회전
@@ -1046,7 +1062,7 @@ class Block:
 
         #반영
         self.applyFakeBlock()
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote:
+        if gameType is GameType.Network and not self.gamevalue.isRemote:
             self.synchronizePosition()
 
     #우측 회전
@@ -1089,7 +1105,7 @@ class Block:
 
         #반영
         self.applyFakeBlock()
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote:
+        if gameType is GameType.Network and not self.gamevalue.isRemote:
             self.synchronizePosition()
 
     #블럭 고정
@@ -1138,7 +1154,7 @@ class Block:
         else:
             self.gamevalue.combo = 0
         
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote:
+        if gameType is GameType.Network and not self.gamevalue.isRemote:
             self.synchronizeCells()
 
     #충돌 감지
@@ -1193,13 +1209,13 @@ class Block:
 
     #위치 동기화
     def synchronizePosition(self):
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote:
+        if gameType is GameType.Network and not self.gamevalue.isRemote:
             packet = Packet(PacketInOut.Out, {"tick": self.gamevalue.manager.tick, "id": self.id, "x": self.x, "y": self.y, "dirX": self.dirX, "dirY": self.dirY, "dirZ": self.dirZ}, PacketType.BlockMove)
             packet.sendTo()
 
     #셀 배치 동기화        
     def synchronizeCells(self):
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote:
+        if gameType is GameType.Network and not self.gamevalue.isRemote:
             encodedCells = ""
             for x in range(0, HORIZONTAL_CELL_COUNT):
                 for y in range(0, VERTICAL_CELL_COUNT):
@@ -1303,7 +1319,7 @@ class GameManager:
             appState = AppState.Game
 
         #반영
-        if gamemode is GameMode.Network:
+        if gameType is GameType.Network:
             synchronizedGameSetting = SynchronizeState.WaitBoth
     
     #게임 리셋
@@ -1339,9 +1355,9 @@ class GameManager:
             synchronizedGameSetting =  SynchronizeState.Synchronized
             synchronizedGameOver =  SynchronizeState.Synchronized
             synchronizedRestart =  SynchronizeState.Synchronized
-        if gamemode is GameMode.Local:  #화면 Offset 설정
+        if gameType is GameType.Local:  #화면 Offset 설정
             self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_MID
-        elif gamemode is GameMode.Network:
+        elif gameType is GameType.Network:
             if self.gamevalue.isRemote:
                 self.gamevalue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_RIGHT
             else:
@@ -1353,7 +1369,7 @@ class GameManager:
         global synchronizedGameOver
 
         #반영
-        if not force and gamemode is GameMode.Network and not synchronizedGameOver is SynchronizeState.WaitSend:
+        if not force and gameType is GameType.Network and not synchronizedGameOver is SynchronizeState.WaitSend:
             packet = Packet(PacketInOut.Out, {"tick": self.tick}, PacketType.SynchronizeGameOver)
             packet.sendTo()
             synchronizedGameOver = SynchronizeState.WaitSend
@@ -1390,25 +1406,25 @@ class GameManager:
 
         if appState is AppState.Game:
             #동기화 실행
-            if self.gamevalue.isRemote and gamemode is GameMode.Network and synchronizedGameOver is SynchronizeState.WaitSend:
+            if self.gamevalue.isRemote and gameType is GameType.Network and synchronizedGameOver is SynchronizeState.WaitSend:
                 #게임 오버 동기화
                 packet = Packet(PacketInOut.Out, {"tick": self.tick}, PacketType.SynchronizeGameOver)
                 packet.sendTo()
-            if self.gamevalue.isRemote and gamemode is GameMode.Network and synchronizedRestart is SynchronizeState.WaitSend:
+            if self.gamevalue.isRemote and gameType is GameType.Network and synchronizedRestart is SynchronizeState.WaitSend:
                 #재시작 동기화
                 if localRestart:
                     packet = Packet(PacketInOut.Out, {}, PacketType.SynchronizeRestart)
                 else:
                     packet = Packet(PacketInOut.Out, {}, PacketType.SynchronizeCancelRestart)
                 packet.sendTo()
-            if self.gamevalue.isRemote and gamemode is GameMode.Network and (synchronizedGameSetting is SynchronizeState.WaitSend or synchronizedGameSetting is SynchronizeState.WaitBoth):
+            if self.gamevalue.isRemote and gameType is GameType.Network and (synchronizedGameSetting is SynchronizeState.WaitSend or synchronizedGameSetting is SynchronizeState.WaitBoth):
                 #게임 설정 동기화
                 packet = Packet(PacketInOut.Out, {"seed": localGameValue.RANDOM_SEED, "speed": localGameValue.TICK_PER_CELL}, PacketType.SynchronizeGameSetting)
                 packet.sendTo(address)
             if synchronizedGameSetting is not SynchronizeState.Synchronized:
                 #게임 오버 동기화 될 때까지 대기
                 return
-            if self.tick % TPS == 0 and gamemode is GameMode.Network and not self.gamevalue.isRemote and not localGameValue.gameState is GameState.GameOver:
+            if self.tick % TPS == 0 and gameType is GameType.Network and not self.gamevalue.isRemote and not localGameValue.gameState is GameState.GameOver:
                 #블럭 낙하 속도 동기화
                 self.synchronizedFallingSpeed()
 
@@ -1416,7 +1432,7 @@ class GameManager:
             
             #Network 게임모드에서는 Pause 상태여도 게임이 계속 진행됨
             state = self.gamevalue.gameState
-            if gamemode is GameMode.Network and self.gamevalue.gameState is GameState.Paused:
+            if gameType is GameType.Network and self.gamevalue.gameState is GameState.Paused:
                 state = self.gamevalue.prePauseState
 
             #GameState별 처리
@@ -1432,7 +1448,7 @@ class GameManager:
                 #애니매이션 재생
                 if len(self.gamevalue.animations) == 0:
                     #애니매이션 완료시 이전 상태로 복귀
-                    if self.gamevalue.gameState is GameState.Paused and gamemode is GameMode.Network:
+                    if self.gamevalue.gameState is GameState.Paused and gameType is GameType.Network:
                         self.gamevalue.prePauseState = self.gamevalue.preAnimaionState
                     else:
                         self.gamevalue.changeState(self.gamevalue.preAnimaionState)
@@ -1452,7 +1468,7 @@ class GameManager:
             pass
         elif packet.type is PacketType.SynchronizeGameSetting:
             #게임 설정 동기화
-            packetOut = Packet(PacketInOut.Out, {}, PacketType.Synchronized)
+            packetOut = Packet(PacketInOut.Out, {"type": 0}, PacketType.Synchronized)
             packetOut.sendTo()
 
             #이미 동기화 되었다면 return
@@ -1474,27 +1490,41 @@ class GameManager:
                 synchronizedGameSetting = SynchronizeState.Synchronized
         elif packet.type is PacketType.Synchronized:
             #동기화 완료
+            (type, result) = packet.getIntValues("type")
 
-            #게임 오버 동기화
-            if synchronizedGameOver is SynchronizeState.WaitSend:
-                synchronizedGameOver = SynchronizeState.Synchronized
-                localManager.gameEnd(True)
+            if not result:
+                return
 
             #게임 설정 동기화
-            if synchronizedGameSetting is SynchronizeState.WaitBoth:
-                synchronizedGameSetting = SynchronizeState.WaitReceived
-            elif synchronizedGameSetting is SynchronizeState.WaitSend:
-                synchronizedGameSetting = SynchronizeState.Synchronized
+            if type == 0:
+                if synchronizedGameSetting is SynchronizeState.WaitBoth:
+                    synchronizedGameSetting = SynchronizeState.WaitReceived
+                elif synchronizedGameSetting is SynchronizeState.WaitSend:
+                    synchronizedGameSetting = SynchronizeState.Synchronized
+
+            #효과 동기화
+            elif type == 1:
+                (id, result) = packet.getIntValues("id")
+
+                if not result:
+                    return
 
             #재시작 동기화
-            if synchronizedRestart is SynchronizeState.WaitSend:
-                synchronizedRestart = SynchronizeState.Synchronized
-                if localRestart == True and remoteRestart == True and localGameValue.gameState is GameState.GameOver:
-                    localManager.gameStart()
-                    remoteManager.gameStart()
+            elif type == 2:
+                if synchronizedRestart is SynchronizeState.WaitSend:
+                    synchronizedRestart = SynchronizeState.Synchronized
+                    if localRestart == True and remoteRestart == True and localGameValue.gameState is GameState.GameOver:
+                        localManager.gameStart()
+                        remoteManager.gameStart()
+
+            #게임 오버 동기화
+            elif type == 3:
+                if synchronizedGameOver is SynchronizeState.WaitSend:
+                    synchronizedGameOver = SynchronizeState.Synchronized
+                    localManager.gameEnd(True)
         elif packet.type is PacketType.SynchronizeGameOver:
             #게임 종료
-            packetOut = Packet(PacketInOut.Out, {}, PacketType.Synchronized)
+            packetOut = Packet(PacketInOut.Out, {"type": 3}, PacketType.Synchronized)
             packetOut.sendTo()
 
             #동기화 상태 변경
@@ -1574,9 +1604,24 @@ class GameManager:
                 return
 
             self.gamevalue.TICK_PER_CELL = speed
+        elif packet.type is PacketType.ApplyEffect:
+            #효과 적용
+            packetOut = Packet(PacketInOut.Out, {"type": 1, "id": 0}, PacketType.Synchronized)
+            packetOut.sendTo()
+            
+            (remoteTick, id, result) = packet.getIntValues("tick", "id")
+
+            if not result:
+                return
+            if self.tick < remoteTick:
+                #미래의 패킷이면 보관한 후 나중에 처리
+                postponePacket(packet)
+                return
+
+            
         elif packet.type is PacketType.SynchronizeRestart:
             #다시하기
-            packetOut = Packet(PacketInOut.Out, {}, PacketType.Synchronized)
+            packetOut = Packet(PacketInOut.Out, {"type": 2}, PacketType.Synchronized)
             packetOut.sendTo()
             
             if not localGameValue.gameState is GameState.GameOver:
@@ -1590,7 +1635,7 @@ class GameManager:
                     localManager.gameStart()
         elif packet.type is PacketType.SynchronizeCancelRestart:
             #다시하기 취소
-            packetOut = Packet(PacketInOut.Out, {}, PacketType.Synchronized)
+            packetOut = Packet(PacketInOut.Out, {"type": 2}, PacketType.Synchronized)
             packetOut.sendTo()
 
             if not localGameValue.gameState is GameState.GameOver:
@@ -1616,7 +1661,7 @@ class GameManager:
      
     #블럭 하락 속도 동기화
     def synchronizedFallingSpeed(self):
-        if gamemode is GameMode.Network and not self.gamevalue.isRemote and not self.gamevalue.gameState is GameState.GameOver:
+        if gameType is GameType.Network and not self.gamevalue.isRemote and not self.gamevalue.gameState is GameState.GameOver:
             packet = Packet(PacketInOut.Out, {"tick": self.tick, "speed": self.gamevalue.TICK_PER_CELL}, PacketType.ChangeTickPerCell)
             packet.sendTo()
 
@@ -1630,7 +1675,7 @@ class GameManager:
         #빠른 드랍
         if keyCode == KEY_FAST_DROP:
             self.gamevalue.TICK_PER_CELL = ACCELERATED_TICK_PRE_CELL
-            if gamemode is GameMode.Network and networkState.Connected and appState.Game and not self.gamevalue.isRemote and not self.gamevalue.gameState is GameState.GameOver:
+            if gameType is GameType.Network and networkState.Connected and appState.Game and not self.gamevalue.isRemote and not self.gamevalue.gameState is GameState.GameOver:
                 self.synchronizedFallingSpeed()
         
         if not appState is AppState.Game or self.gamevalue.gameState is GameState.GameOver:
@@ -1688,16 +1733,16 @@ class GameManager:
         #빠른 드랍
         if keyCode == KEY_FAST_DROP:
             self.gamevalue.TICK_PER_CELL = DEFAULT_TICK_PER_CELL
-            if gamemode is GameMode.Network and networkState.Connected and appState.Game and not self.gamevalue.isRemote and not self.gamevalue.gameState is GameState.GameOver:
+            if gameType is GameType.Network and networkState.Connected and appState.Game and not self.gamevalue.isRemote and not self.gamevalue.gameState is GameState.GameOver:
                 self.synchronizedFallingSpeed()
 
     #마우스 클릭시 
     def mouseUp(self):
         global appState
         global menuState
-        global gamemode
+        global gameType
         global keyInputListener
-        global networkThead
+        global networkThread
         global networkState
         global synchronizedRestart
         global localRestart
@@ -1706,6 +1751,7 @@ class GameManager:
         global SCREEN_RESOLUTION
         global displaySettingResetTick
         global screen
+        global gameMode
         
         if self.gamevalue.isRemote:
             return
@@ -1730,23 +1776,16 @@ class GameManager:
             elif menuState is MenuState.GameMode:
                 if isCollideIn(pos, SCREEN_WIDTH / 4 + 10, SCREEN_HEIGTH - 230, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH - 140):
                     #게임 플레이 - Sole
-                    gamemode = GameMode.Local
+                    gameType = GameType.Local
                     self.gameReset()
                     self.gameStart()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 295, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #게임 플레이 - Create Room
-                    gamemode = GameMode.Network
+                    gameType = GameType.Network
                     menuState = MenuState.CreateRoom
-                    createRoom()
-
-                    if not networkThead is None:
-                        return
-
-                    networkThead = threading.Thread(target=waitEnter, daemon=True)
-                    networkThead.start()
                 elif isCollideIn(pos, 3 * SCREEN_WIDTH / 4 - 10, SCREEN_HEIGTH - 165, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGTH / 2 - 75):
                     #게임 플레이 - Enter Room
-                    gamemode = GameMode.Network
+                    gameType = GameType.Network
                     menuState = MenuState.EnterRoom
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     #세팅 - Quit
@@ -1809,10 +1848,27 @@ class GameManager:
                     menuState = MenuState.Options
             elif menuState == MenuState.CreateRoom:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
-                    if not networkState is NetworkState.Connected:
-                        #방 생성 - Quit
-                        closeRoom(useAlert = False)
-                        menuState = MenuState.GameMode
+                    #방 생성 - Quit
+                    menuState = MenuState.GameMode
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40):
+                    if networkThread is None:
+                        #방 생성 - Create
+                        print("create")
+                        createRoom()
+
+                        networkThread = threading.Thread(target=waitEnter, daemon=True)
+                        networkThread.start()
+                    else:
+                        #방 생성 - Cancel
+                        print("close")
+                        closeRoom(useAlert = False, stay = True)
+                elif isCollideIn(pos, SCREEN_WIDTH / 2 + 125, 90, 200, 50):
+                    #방 생성 - GameMode
+                    if networkThread is None:
+                        if gameMode is GameMode.Classic:
+                            gameMode = GameMode.Fusion
+                        else:
+                            gameMode = GameMode.Classic
             elif menuState == MenuState.EnterRoom:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
                     if not networkState is NetworkState.Connected:
@@ -1824,22 +1880,22 @@ class GameManager:
                         #방 입장 - Connect
                         createRoom()
 
-                        if not networkThead is None:
+                        if not networkThread is None:
                             return
 
                         _ip = displayObjects["ip1"].getContent()
                         _ip += "." + displayObjects["ip2"].getContent()
                         _ip += "." + displayObjects["ip3"].getContent()
                         _ip += "." + displayObjects["ip4"].getContent()
-                        networkThead = threading.Thread(daemon=True, target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
-                        networkThead.start()
+                        networkThread = threading.Thread(daemon=True, target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
+                        networkThread.start()
                     elif networkState is NetworkState.Connecting:
                         #방 입장 - Cancel
                         closeRoom(useAlert = False)
         elif appState is AppState.Game:
             if localGameValue.gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
-                    if gamemode is GameMode.Network:
+                    if gameType is GameType.Network:
                         if localRestart == False:
                             #게임 오버 - Restart
                             localRestart = True
@@ -1854,7 +1910,7 @@ class GameManager:
                         self.gameStart()
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40):
                     #게임 오버 - Back To Menu
-                    if gamemode is GameMode.Network:
+                    if gameType is GameType.Network:
                         closeRoom(useAlert = False)
                     appState = AppState.Menu
                     menuState = MenuState.Main
@@ -1863,7 +1919,7 @@ class GameManager:
                     #정지 메뉴 - Continue
                     localGameValue.gameState = localGameValue.prePauseState
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40):
-                    if gamemode is GameMode.Network:
+                    if gameType is GameType.Network:
                         #정지 메뉴 - Give Up
                         self.gameEnd()
                     else:
@@ -1873,7 +1929,7 @@ class GameManager:
                         self.gameStart()
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40):
                     #정지 메뉴 - Back To Menu
-                    if gamemode is GameMode.Network:
+                    if gameType is GameType.Network:
                         closeRoom(useAlert = False)
                     else:
                         self.gameEnd()
@@ -2022,15 +2078,22 @@ class GameManager:
                     drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
                 #방 생성
-                if networkState is NetworkState.Disconnected:
-                    drawText("Waiting Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
-                elif networkState is NetworkState.Connecting:
-                    drawText("Connecting", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
-                elif networkState is NetworkState.Connected:
-                    drawText("Connected!", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                if networkThread is None:
+                    drawText("GameMode", SCREEN_WIDTH / 2 - 100, 90, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                    drawInterectibleTextRect(pos, str(gameMode._name_), SCREEN_WIDTH / 2 + 125, 90, 200, 50, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                else:
+                    if networkState is NetworkState.Disconnected:
+                        drawText("Waiting Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2 - 50, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    elif networkState is NetworkState.Connecting:
+                        drawText("Connecting", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2 - 50, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
+                    elif networkState is NetworkState.Connected:
+                        drawText("Connected!", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2 - 50, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
 
-                if not networkState is NetworkState.Connected:
-                    drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if networkThread is None:
+                    drawInterectibleTextRect(pos, "Create", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                else:
+                    drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.EnterRoom:
                 #방 입장
                 if networkState is NetworkState.Connecting:
@@ -2067,11 +2130,11 @@ class GameManager:
                     drawText("Restart Require!", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 157, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
                 elif localRestart:
                     drawText("Waiting Other Player", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 157, size = 25, color = (255, 255, 255), font = "hancommalangmalang")
-                if gamemode is GameMode.Network and localRestart:
+                if gameType is GameType.Network and localRestart:
                     drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
                     drawInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                if gamemode is GameMode.Local or not localRestart:
+                if gameType is GameType.Local or not localRestart:
                     drawInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 70, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif localGameValue.gameState is GameState.Paused:
                 #정지 메뉴
@@ -2080,14 +2143,14 @@ class GameManager:
                 drawTextRect("score " + str(localGameValue.score), SCREEN_WIDTH / 2, 170, dy = 40, dx = 200, size = 30, color = (255, 255, 255), font = "hancommalangmalang", backgroundColor = (20, 20, 20))
                 
                 drawInterectibleTextRect(pos, "Continue", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 155, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                if gamemode is GameMode.Local:
+                if gameType is GameType.Local:
                     drawInterectibleTextRect(pos, "Restart", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
                     drawInterectibleTextRect(pos, "Give Up", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 105, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 drawInterectibleTextRect(pos, "Back to Menu", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 55, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             else:
                 #게임 중
-                if gamemode is GameMode.Network:
+                if gameType is GameType.Network:
                     drawText(str(localGameValue.score), 250, 50, color = (255, 255, 255), font = "hancommalangmalang")
                     drawText(str(remoteGameValue.score), 550, 50, color = (255, 255, 255), font = "hancommalangmalang")
                 else:
@@ -2123,7 +2186,7 @@ while True:
             #윈도우 종료 처리
             if event.type == pygame.QUIT:
                 try:
-                    if gamemode is GameMode.Network and networkState is NetworkState.Connected:
+                    if gameType is GameType.Network and networkState is NetworkState.Connected:
                         closeRoom(useAlert = False)
                     if appState is AppState.Run and not localManager.gameState == GameState.GameOver:
                         localManager.gameEnd()
@@ -2168,7 +2231,7 @@ while True:
                     localManager.keyPressed(keyCode)
         
         #패킷 처리
-        if gamemode is GameMode.Network and networkState is NetworkState.Connected:
+        if gameType is GameType.Network and networkState is NetworkState.Connected:
             packet = None
             while True:
                 try:
@@ -2188,13 +2251,13 @@ while True:
 
 
         #메인 로직
-        if gamemode is GameMode.Network:
+        if gameType is GameType.Network:
             remoteManager.update()
         localManager.update()
         
         #화면 업데이트
         screen.fill(SCREEN_COLOR)
-        if gamemode is GameMode.Network:
+        if gameType is GameType.Network:
             remoteManager.drawScreen()
         localManager.drawScreen()
         localManager.drawUI()
