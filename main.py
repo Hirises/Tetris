@@ -491,11 +491,8 @@ def setPauseKey(keyCode):
 
 #텍스트 필드 디스플레이 조건 지원 용도
 def whenNetworkSetting():
-    global menuState
-    return menuState is MenuState.Settings
+    return menuState is MenuState.Settings and networkThread is None
 def whenIpInputing():
-    global menuState
-    global networkState
     return menuState is MenuState.EnterRoom and networkState is NetworkState.Disconnected
 
 #해상도 초기화 지원용도
@@ -1853,14 +1850,12 @@ class GameManager:
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40):
                     if networkThread is None:
                         #방 생성 - Create
-                        print("create")
                         createRoom()
 
                         networkThread = threading.Thread(target=waitEnter, daemon=True)
                         networkThread.start()
                     else:
                         #방 생성 - Cancel
-                        print("close")
                         closeRoom(useAlert = False, stay = True)
                 elif isCollideIn(pos, SCREEN_WIDTH / 2 + 125, 90, 200, 50):
                     #방 생성 - GameMode
@@ -2068,7 +2063,8 @@ class GameManager:
                 drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Settings:
                 #일반 설정
-                drawText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
+                if networkThread is None:
+                    drawText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 drawText("Resolution", SCREEN_WIDTH / 2 - 100, 90, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 drawInterectibleTextRect(pos, str(int(SCREEN_WIDTH * PRE_SCREEN_RESOLUTION)) + " X " + str(int(SCREEN_HEIGTH * PRE_SCREEN_RESOLUTION)), SCREEN_WIDTH / 2 + 125, 90, 200, 50, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
 
