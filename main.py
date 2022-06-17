@@ -785,7 +785,7 @@ def waitEnter():
         return
 
     #접속 수락 패킷 전송
-    packet = Packet(PacketInOut.Out, {}, PacketType.AccessAccept)
+    packet = Packet(PacketInOut.Out, {"mode": gameMode.value}, PacketType.AccessAccept)
     packet.sendTo(_address)
 
     address = _address
@@ -812,6 +812,7 @@ def enterRoom(_ip, _port):
     global packetPool
     global returnedPackets
     global gameType
+    global gameMode
 
     if netSocket is None:
         createRoom()
@@ -845,6 +846,11 @@ def enterRoom(_ip, _port):
         if packet.valid and packet.type == PacketType.AccessDeny:
             alertLog("Error 103", "Incorrect game version", "please check game version")
         return
+    (mode, result) = packet.getIntValues("mode")
+    if not result:
+        errorLog("exception 234", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+        return
+    gameMode = GameMode(mode)
 
     address = _address
     networkState = NetworkState.Connected
