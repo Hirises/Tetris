@@ -218,7 +218,8 @@ netSocket = None     #소켓
 address = None      #주소
 
 networkState = NetworkState.Disconnected    #현재 네드워크 상태
-networkThread = None        #네트워킹 담당 쓰레드
+packetListeningThread = None        #네트워킹 담당 쓰레드
+subNetworkingThread = None          #기타 네트워크 관련 쓰레드(접속처리시 사용)
 packetPool = None          #패킷 풀
 returnedPackets = None     #반환된 패킷
 packetPoolLock = threading.Lock()   #패킷 풀 락
@@ -227,11 +228,13 @@ remoteGameValue.GAME_SCREEN_OFFSET = GAME_SCREEN_OFFSET_RIGHT
 remoteGameValue.isRemote = True
 localRestart = False    #재시작 동의 여부
 remoteRestart = False
+isServer = False
 class SynchronizeState(Enum):   #동기화 진행 상태
     WaitBoth = 0        #송수신 대기 중
     WaitReceived = 1    #패킷 수신 대기 중
     WaitSend = 2        #수신 완료 패킷 대기 중 (송신 완료 대기 중)
     Synchronized = 3    #동기화 완료
+synchronizedConnection = SynchronizeState.Synchronized  #서버-클라이언트 접속 동기화 여부
 synchronizedGameSetting = SynchronizeState.Synchronized #게임 설정 동기화 여부
 synchronizedGameOver = SynchronizeState.Synchronized    #게임 오버 동기화 여부
 synchronizedRestart = SynchronizeState.Synchronized     #재시작 동의 상태 동기화 여부
@@ -491,7 +494,7 @@ def setPauseKey(keyCode):
 
 #텍스트 필드 디스플레이 조건 지원 용도
 def whenNetworkSetting():
-    return menuState is MenuState.Settings and networkThread is None
+    return menuState is MenuState.Settings and packetListeningThread is None
 def whenIpInputing():
     return menuState is MenuState.EnterRoom and networkState is NetworkState.Disconnected
 
@@ -665,33 +668,38 @@ def createRoom():
 
     debugLog("socket is opend")
 
+    try:
+        #소켓 바인딩
+        netSocket.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
+    except Exception as e:
+        if displayObjects["port"] is None:
+            errorLog("exception 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", "Text File is None")
+        else:
+            errorLog("exception 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", displayObjects["port"].getContent())
+        debugLog(type(e), e)
+        closeRoom(useAlert = False)
+        alertLog("Error 101", "Fail to bind socket", "Try for other port")
+        return
+    
+    debugLog("socket is binded at port " + displayObjects["port"].getContent())
+
 #방 제거
 def closeRoom(deep = 1, useAlert = True, stay = False):
     global netSocket
     global networkState
     global address
-    global networkThread
+    global packetListeningThread
     global packetPool
     global returnedPackets
     global appState
     global menuState
+    global subNetworkingThread
+    global synchronizedConnection
 
     #스텍 오버플로우 방지용도
     if deep > 5:
         errorLog("exception 211", "Stack Over Flow")
         return
-
-    if gameType is GameType.Network:
-        if not localGameValue.gameState is GameState.GameOver and appState == AppState.Game:
-            localManager.gameEnd(True)
-        if not stay:
-            appState = AppState.Menu
-            menuState = MenuState.GameMode
-
-    if not netSocket is None and not address is None and networkState is NetworkState.Connected:
-        #QUIT 패킷 전송
-        packet = Packet(PacketInOut.Out, {}, PacketType.Disconnect)
-        packet.sendTo()
 
     if netSocket is None:
         errorLog("exception 212", "소켓이 존재하지 않습니다")
@@ -714,162 +722,164 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
     finally:
         packetPoolLock.release()
     networkState = NetworkState.Disconnected
+    synchronizedConnection = SynchronizeState.Synchronized
     address = None
     netSocket = None
-    networkThread = None
+    packetListeningThread = None
+    subNetworkingThread = None
     debugLog("socket is closed")
     if useAlert:
         alertLog("Connection is Closed")
 
+    if gameType is GameType.Network:
+        if not localGameValue.gameState is GameState.GameOver and appState == AppState.Game:
+            localManager.gameEnd(True)
+        if not stay:
+            appState = AppState.Menu
+            menuState = MenuState.GameMode
+
+    if not netSocket is None and not address is None and networkState is NetworkState.Connected:
+        #QUIT 패킷 전송
+        packet = Packet(PacketInOut.Out, {}, PacketType.Disconnect)
+        packet.sendTo()
+
 #접속 대기
-def waitEnter():
-    global netSocket
-    global networkState
-    global address
-    global packetPool
-    global returnedPackets
-    global gameType
+# def waitEnter():
+#     global netSocket
+#     global networkState
+#     global address
+#     global packetPool
+#     global returnedPackets
+#     global gameType
 
-    if netSocket is None:
-        createRoom()
+#     if netSocket is None:
+#         createRoom()
 
-    try:
-        #소켓 바인딩
-        netSocket.bind(("127.0.0.1", int(displayObjects["port"].getContent())))
-    except Exception as e:
-        if displayObjects["port"] is None:
-            errorLog("exception 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", "Text File is None")
-        else:
-            errorLog("exception 221", "소켓 바인딩에 실패하였습니다", "socket", netSocket, "port", displayObjects["port"].getContent())
-        debugLog(type(e), e)
-        closeRoom(useAlert = False)
-        alertLog("Error 101", "Fail to bind socket", "Try for other port")
-        return
-    
-    debugLog("socket is binded at port " + displayObjects["port"].getContent())
+#     try:
+#         (rawData, _address) = netSocket.recvfrom(1024)
+#         data = rawData.decode()
+#     except Exception as e:
+#         errorLog("exception 222", "클라이언트로부터 패킷 수신에 실패하엿습니다", "socket", netSocket)
+#         debugLog(type(e), e)
+#         closeRoom(useAlert = False, stay = True)
+#         if networkState is NetworkState.Disconnected:
+#             return
+#         waitEnter()
+#         return
 
-    try:
-        (rawData, _address) = netSocket.recvfrom(1024)
-        data = rawData.decode()
-    except Exception as e:
-        errorLog("exception 222", "클라이언트로부터 패킷 수신에 실패하엿습니다", "socket", netSocket)
-        debugLog(type(e), e)
-        closeRoom(useAlert = False, stay = True)
-        if networkState is NetworkState.Disconnected:
-            return
-        waitEnter()
-        return
+#     networkState = NetworkState.Connecting
+#     packet = Packet(PacketInOut.In, data)
+#     if not packet.valid or not packet.type is PacketType.AccessRequire:
+#         #이상한 패킷을 받았으면 취소
+#         if packet.valid:
+#             errorLog("exception 223", "올바르지 않은 패킷입니다", "type", packet.type)
+#         else:
+#             errorLog("exception 223", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
+#         closeRoom(useAlert = False, stay = True)
+#         waitEnter()
+#         return
+#     (version, result) = packet.getIntValues("ver")
+#     if not result or version != GAME_VERSION:
+#         #게임 버전이 일치하지 않으면 취소
+#         if result:
+#             errorLog("exception 224", "게임 버전이 일치하지 않습니다", "local version", GAME_VERSION, "remote version", version)
+#         else:
+#             errorLog("exception 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+#         packet = Packet(PacketInOut.Out, {}, PacketType.AccessDeny)
+#         packet.sendTo(_address)
+#         closeRoom(useAlert = False, stay = True)
+#         waitEnter()
+#         return
 
-    networkState = NetworkState.Connecting
-    packet = Packet(PacketInOut.In, data)
-    if not packet.valid or not packet.type is PacketType.AccessRequire:
-        #이상한 패킷을 받았으면 취소
-        if packet.valid:
-            errorLog("exception 223", "올바르지 않은 패킷입니다", "type", packet.type)
-        else:
-            errorLog("exception 223", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
-        closeRoom(useAlert = False, stay = True)
-        waitEnter()
-        return
-    (version, result) = packet.getIntValues("ver")
-    if not result or version != GAME_VERSION:
-        #게임 버전이 일치하지 않으면 취소
-        if result:
-            errorLog("exception 224", "게임 버전이 일치하지 않습니다", "local version", GAME_VERSION, "remote version", version)
-        else:
-            errorLog("exception 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
-        packet = Packet(PacketInOut.Out, {}, PacketType.AccessDeny)
-        packet.sendTo(_address)
-        closeRoom(useAlert = False, stay = True)
-        waitEnter()
-        return
+#     #접속 수락 패킷 전송
+#     packet = Packet(PacketInOut.Out, {"mode": gameMode.value}, PacketType.AccessAccept)
+#     packet.sendTo(_address)
 
-    #접속 수락 패킷 전송
-    packet = Packet(PacketInOut.Out, {"mode": gameMode.value}, PacketType.AccessAccept)
-    packet.sendTo(_address)
+#     address = _address
+#     networkState = NetworkState.Connected
+#     debugLog("successfully connected with client from " + address[0] + ":" + str(address[1]))
+#     try:
+#         packetPoolLock.acquire()
+#         packetPool = []
+#         returnedPackets = []
+#     finally:
+#         packetPoolLock.release()
+#     gameType = GameType.Network
 
-    address = _address
-    networkState = NetworkState.Connected
-    debugLog("successfully connected with client from " + address[0] + ":" + str(address[1]))
-    try:
-        packetPoolLock.acquire()
-        packetPool = []
-        returnedPackets = []
-    finally:
-        packetPoolLock.release()
-    gameType = GameType.Network
-
-    t = threading.Thread(target=runPacketListener, daemon=True)
-    t.start()
-    localManager.gameStart()
-    remoteManager.gameStart()
+#     t = threading.Thread(target=runPacketListener, daemon=True)
+#     t.start()
+#     localManager.gameStart()
+#     remoteManager.gameStart()
 
 #방 접속
-def enterRoom(_ip, _port):
-    global netSocket
-    global networkState
-    global address
-    global packetPool
-    global returnedPackets
-    global gameType
-    global gameMode
+# def enterRoom(_ip, _port):
+#     global netSocket
+#     global networkState
+#     global address
+#     global packetPool
+#     global returnedPackets
+#     global gameType
+#     global gameMode
 
-    if netSocket is None:
-        createRoom()
-    networkState = NetworkState.Connecting
+#     if netSocket is None:
+#         createRoom()
+#     networkState = NetworkState.Connecting
 
-    #접속 요청 패킷 전송
-    packet = Packet(PacketInOut.Out, {"ver" : GAME_VERSION}, PacketType.AccessRequire)
-    packet.sendTo((_ip, _port))
+#     #접속 요청 패킷 전송
+#     packet = Packet(PacketInOut.Out, {"ver" : GAME_VERSION}, PacketType.AccessRequire)
+#     packet.sendTo((_ip, _port))
 
-    debugLog("send packet to server. wait respond")
+#     debugLog("send packet to server. wait respond")
 
-    data = None
-    try:
-        #서버측 응답 대기
-        (rawData, _address) = netSocket.recvfrom(1024)
-        data = rawData.decode()
-    except Exception as e:
-        errorLog("exception 231", "서버로부터 패킷 수신에 실패하였습니다", "socket", netSocket)
-        debugLog(type(e), e)
-        closeRoom(useAlert = False, stay = True)
-        return
+#     data = None
+#     try:
+#         #서버측 응답 대기
+#         (rawData, _address) = netSocket.recvfrom(1024)
+#         data = rawData.decode()
+#     except Exception as e:
+#         errorLog("exception 231", "서버로부터 패킷 수신에 실패하였습니다", "socket", netSocket)
+#         debugLog(type(e), e)
+#         closeRoom(useAlert = False, stay = True)
+#         return
 
-    packet = Packet(PacketInOut.In, data)
-    if not packet.valid or not packet.type is PacketType.AccessAccept:
-        #접속 수락 패킷이 아니면 취소
-        if packet.valid:
-            errorLog("exception 232", "올바르지 않은 패킷입니다", "type", packet.type)
-        else:
-            errorLog("exception 233", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
-        closeRoom(useAlert = False, stay = True)
-        if packet.valid and packet.type == PacketType.AccessDeny:
-            alertLog("Error 103", "Incorrect game version", "please check game version")
-        return
-    (mode, result) = packet.getIntValues("mode")
-    if not result:
-        errorLog("exception 234", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
-        return
-    gameMode = GameMode(mode)
+#     packet = Packet(PacketInOut.In, data)
+#     if not packet.valid or not packet.type is PacketType.AccessAccept:
+#         #접속 수락 패킷이 아니면 취소
+#         if packet.valid:
+#             errorLog("exception 232", "올바르지 않은 패킷입니다", "type", packet.type)
+#         else:
+#             errorLog("exception 233", "올바르지 않은 패킷입니다", "type", "Packet is Invaild")
+#         closeRoom(useAlert = False, stay = True)
+#         if packet.valid and packet.type == PacketType.AccessDeny:
+#             alertLog("Error 103", "Incorrect game version", "please check game version")
+#         return
+#     (mode, result) = packet.getIntValues("mode")
+#     if not result:
+#         errorLog("exception 234", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+#         return
+#     gameMode = GameMode(mode)
 
-    address = _address
-    networkState = NetworkState.Connected
-    debugLog("successfully connected with server from " + address[0] + ":" + str(address[1]))
-    try:
-        packetPoolLock.acquire()
-        packetPool = []
-        returnedPackets = []
-    finally:
-        packetPoolLock.release()
-    gameType = GameType.Network
+#     address = _address
+#     networkState = NetworkState.Connected
+#     debugLog("successfully connected with server from " + address[0] + ":" + str(address[1]))
+#     try:
+#         packetPoolLock.acquire()
+#         packetPool = []
+#         returnedPackets = []
+#     finally:
+#         packetPoolLock.release()
+#     gameType = GameType.Network
 
-    t = threading.Thread(target=runPacketListener, daemon=True)
-    t.start()
-    localManager.gameStart()
-    remoteManager.gameStart()
+#     t = threading.Thread(target=runPacketListener, daemon=True)
+#     t.start()
+#     localManager.gameStart()
+#     remoteManager.gameStart()
 
 #무한 반복 패킷 수신 처리기
 def runPacketListener():
+    if netSocket is None:
+        createRoom()
+
     debugLog("start listening packet")
     while(True):
         #접속 종료 처리
@@ -1745,7 +1755,7 @@ class GameManager:
         global menuState
         global gameType
         global keyInputListener
-        global networkThread
+        global packetListeningThread
         global networkState
         global synchronizedRestart
         global localRestart
@@ -1755,6 +1765,10 @@ class GameManager:
         global displaySettingResetTick
         global screen
         global gameMode
+        global subNetworkingThread
+        global synchronizedConnection
+        global isServer
+        global address
         
         if self.gamevalue.isRemote:
             return
@@ -1854,45 +1868,49 @@ class GameManager:
                     #방 생성 - Quit
                     menuState = MenuState.GameMode
                 elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40):
-                    if networkThread is None:
+                    if packetListeningThread is None:
                         #방 생성 - Create
                         createRoom()
 
-                        networkThread = threading.Thread(target=waitEnter, daemon=True)
-                        networkThread.start()
+                        isServer = True
+                        synchronizedConnection = SynchronizeState.WaitBoth
+                        packetListeningThread = threading.Thread(target=runPacketListener, daemon=True)
+                        packetListeningThread.start()
                     else:
                         #방 생성 - Cancel
                         closeRoom(useAlert = False, stay = True)
                 elif isCollideIn(pos, SCREEN_WIDTH / 2 + 125, 90, 200, 50):
                     #방 생성 - GameMode
-                    if networkThread is None:
+                    if packetListeningThread is None:
                         if gameMode is GameMode.Classic:
                             gameMode = GameMode.Fusion
                         else:
                             gameMode = GameMode.Classic
             elif menuState == MenuState.EnterRoom:
-                if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):
-                    if not networkState is NetworkState.Connected:
-                        #방 입장 - Quit
-                        closeRoom(useAlert = False)
-                        menuState = MenuState.GameMode
-                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55):
-                    if networkState is NetworkState.Disconnected:
+                if isCollideIn(pos,  SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40):   
+                    #방 입장 - Quit
+                    menuState = MenuState.GameMode
+                elif isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40):
+                    if packetListeningThread is None:
                         #방 입장 - Connect
                         createRoom()
-
-                        if not networkThread is None:
-                            return
 
                         _ip = displayObjects["ip1"].getContent()
                         _ip += "." + displayObjects["ip2"].getContent()
                         _ip += "." + displayObjects["ip3"].getContent()
                         _ip += "." + displayObjects["ip4"].getContent()
-                        networkThread = threading.Thread(daemon=True, target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
-                        networkThread.start()
-                    elif networkState is NetworkState.Connecting:
+                        address = (_ip, int(displayObjects["ipPort"].getContent()))
+                        isServer = False
+                        synchronizedConnection = SynchronizeState.WaitBoth
+                        networkState = NetworkState.Connecting
+                        packetListeningThread = threading.Thread(target=runPacketListener, daemon=True)
+                        packetListeningThread.start()
+
+                        # subNetworkingThread = threading.Thread(daemon=True, target=enterRoom, args=(_ip, int(displayObjects["ipPort"].getContent())))
+                        # subNetworkingThread.start()
+                    else:
                         #방 입장 - Cancel
-                        closeRoom(useAlert = False)
+                        closeRoom(useAlert = False, stay = True)
         elif appState is AppState.Game:
             if localGameValue.gameState is GameState.GameOver:
                 if isCollideIn(pos, SCREEN_WIDTH / 2, SCREEN_HEIGTH - 120, 200, 40):
@@ -2069,7 +2087,7 @@ class GameManager:
                 drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Settings:
                 #일반 설정
-                if networkThread is None:
+                if packetListeningThread is None:
                     drawText("Port", SCREEN_WIDTH / 2 - 100, 170, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 drawText("Resolution", SCREEN_WIDTH / 2 - 100, 90, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                 drawInterectibleTextRect(pos, str(int(SCREEN_WIDTH * PRE_SCREEN_RESOLUTION)) + " X " + str(int(SCREEN_HEIGTH * PRE_SCREEN_RESOLUTION)), SCREEN_WIDTH / 2 + 125, 90, 200, 50, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
@@ -2080,7 +2098,7 @@ class GameManager:
                     drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.CreateRoom:
                 #방 생성
-                if networkThread is None:
+                if packetListeningThread is None:
                     drawText("GameMode", SCREEN_WIDTH / 2 - 100, 90, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
                     drawInterectibleTextRect(pos, str(gameMode._name_), SCREEN_WIDTH / 2 + 125, 90, 200, 50, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
@@ -2091,7 +2109,7 @@ class GameManager:
                     elif networkState is NetworkState.Connected:
                         drawText("Connected!", SCREEN_WIDTH / 2, SCREEN_HEIGTH / 2 - 50, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
 
-                if networkThread is None:
+                if packetListeningThread is None:
                     drawInterectibleTextRect(pos, "Create", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
                 else:
                     drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
@@ -2103,13 +2121,13 @@ class GameManager:
                 elif networkState is NetworkState.Connected:
                     drawText("Connected!", SCREEN_WIDTH / 2, 130, size = 50, color = (255, 255, 255), font = "hancommalangmalang")
 
-                if networkState is NetworkState.Disconnected:
-                    drawInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
-                elif networkState is NetworkState.Connecting:
-                    drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 160, 250, 55, size = 30, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                if packetListeningThread is None:
+                    drawInterectibleTextRect(pos, "Connect", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                else:
+                    drawInterectibleTextRect(pos, "Cancel", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 110, 200, 40, size=20, color=(
+                        255, 255, 255), backgroundColor=(50, 50, 50), newBackgroundColor=(100, 100, 100), font="hancommalangmalang")
 
-                if not networkState is NetworkState.Connected:
-                    drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
+                drawInterectibleTextRect(pos, "Quit", SCREEN_WIDTH / 2, SCREEN_HEIGTH - 50, 200, 40, size = 20, color = (255, 255, 255), backgroundColor = (50, 50, 50), newBackgroundColor = (100, 100, 100), font = "hancommalangmalang")
             elif menuState is MenuState.Help:
                 #도움말
                 drawText("Help", SCREEN_WIDTH / 2, 60, size = 40, color = (255, 255, 255), font = "hancommalangmalang")
