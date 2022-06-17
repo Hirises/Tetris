@@ -235,6 +235,7 @@ class SynchronizeState(Enum):   #동기화 진행 상태
     WaitSend = 2        #수신 완료 패킷 대기 중 (송신 완료 대기 중)
     Synchronized = 3    #동기화 완료
 synchronizedConnection = SynchronizeState.Synchronized  #서버-클라이언트 접속 동기화 여부
+synchronizedAccessDeny = SynchronizeState.Synchronized  #클라이언트 접속 거부 동기화 여부
 synchronizedGameSetting = SynchronizeState.Synchronized #게임 설정 동기화 여부
 synchronizedGameOver = SynchronizeState.Synchronized    #게임 오버 동기화 여부
 synchronizedRestart = SynchronizeState.Synchronized     #재시작 동의 상태 동기화 여부
@@ -731,12 +732,11 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
     if useAlert:
         alertLog("Connection is Closed")
 
-    if gameType is GameType.Network:
-        if not localGameValue.gameState is GameState.GameOver and appState == AppState.Game:
-            localManager.gameEnd(True)
-        if not stay:
-            appState = AppState.Menu
-            menuState = MenuState.GameMode
+    if not localGameValue.gameState is GameState.GameOver and appState == AppState.Game:
+        localManager.gameEnd(True)
+    if not stay:
+        appState = AppState.Menu
+        menuState = MenuState.GameMode
 
     if not netSocket is None and not address is None and networkState is NetworkState.Connected:
         #QUIT 패킷 전송
@@ -778,22 +778,6 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
 #         closeRoom(useAlert = False, stay = True)
 #         waitEnter()
 #         return
-#     (version, result) = packet.getIntValues("ver")
-#     if not result or version != GAME_VERSION:
-#         #게임 버전이 일치하지 않으면 취소
-#         if result:
-#             errorLog("exception 224", "게임 버전이 일치하지 않습니다", "local version", GAME_VERSION, "remote version", version)
-#         else:
-#             errorLog("exception 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
-#         packet = Packet(PacketInOut.Out, {}, PacketType.AccessDeny)
-#         packet.sendTo(_address)
-#         closeRoom(useAlert = False, stay = True)
-#         waitEnter()
-#         return
-
-#     #접속 수락 패킷 전송
-#     packet = Packet(PacketInOut.Out, {"mode": gameMode.value}, PacketType.AccessAccept)
-#     packet.sendTo(_address)
 
 #     address = _address
 #     networkState = NetworkState.Connected
@@ -877,6 +861,8 @@ def closeRoom(deep = 1, useAlert = True, stay = False):
 
 #무한 반복 패킷 수신 처리기
 def runPacketListener():
+    global address
+
     if netSocket is None:
         createRoom()
 
@@ -891,6 +877,11 @@ def runPacketListener():
         try:
             #패킷 대기
             (rawData, _address) = netSocket.recvfrom(1024)
+            if address is None:
+                address = _address
+            elif address == _address:
+                errorLog("exception 240", "올바르지 않은 패킷 출처입니다", "address", _address)
+                continue
             data = rawData.decode()
         except ConnectionResetError as e:
             #접속 종료 처리
@@ -1417,7 +1408,12 @@ class GameManager:
             applyScreenResolution()
             displayObjects["alert"].enable = False
 
-        if appState is AppState.Game:
+        if appstate is AppState.Menu:
+            if not self.gamevalue.isRemote and gameType is GameType.Network and not isServer and synchronizedConnection is SynchronizeState.WaitBoth:
+                #서버접속 동기화
+                packet = Packet(PacketInOut.Out, {"ver" : GAME_VERSION}, PacketType.AccessRequire)
+                packet.sendTo(address)
+        elif appState is AppState.Game:
             #동기화 실행
             if self.gamevalue.isRemote and gameType is GameType.Network and synchronizedGameOver is SynchronizeState.WaitSend:
                 #게임 오버 동기화
@@ -1475,10 +1471,35 @@ class GameManager:
         global synchronizedRestart
         global localRestart
         global remoteRestart
+        global synchronizedAccessDeny
+        global synchronizedConnection
 
         if packet.type is PacketType.Invalid:
             #오류 패킷
             pass
+        elif packet.type is PacketType.AccessRequire:
+            if not isServer or not synchronizedConnection is SynchronizeState.WaitBoth:
+                return
+            
+            (version, result) = packet.getIntValues("ver")
+            if not result or version != GAME_VERSION:
+                #게임 버전이 일치하지 않으면 취소
+                if result:
+                    errorLog("exception 224", "게임 버전이 일치하지 않습니다", "local version", GAME_VERSION, "remote version", version)
+                else:
+                    errorLog("exception 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+                synchronizedAccessDeny = SynchronizeState.WaitReceived
+                # packet = Packet(PacketInOut.Out, {}, PacketType.AccessDeny)
+                # packet.sendTo(address)
+                closeRoom(useAlert = False, stay = False)
+                alertLog("Incorrect Game Version", "local: " + str(GAME_VERSION), "remote: " + version)
+                return
+
+            #접속 수락 패킷 전송
+            packet = Packet(PacketInOut.Out, {"mode": gameMode.value}, PacketType.AccessAccept)
+            packet.sendTo(address)
+
+            synchronizedConnection = SynchronizeState.WaitReceived
         elif packet.type is PacketType.SynchronizeGameSetting:
             #게임 설정 동기화
             packetOut = Packet(PacketInOut.Out, {"type": 0}, PacketType.Synchronized)
