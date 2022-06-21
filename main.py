@@ -77,7 +77,7 @@ class CellEffect(Enum):
     Confusion = 1
     Blindness = 2
     SpeedUp = 3
-CELL_EFFECT_RATE = [97, 1, 1, 1]    #CellEffect Enum 순서와 같다
+CELL_EFFECT_RATE = [97, 98, 99, 100]    #CellEffect Enum 순서와 같다
 
 #블럭 설정
 DEFAULT_TICK_PER_CELL = 10      #블럭이 1칸 떨어지는데 걸리는 틱 수
@@ -848,7 +848,8 @@ def enterRoom(_ip, _port):
         return
     (mode, result) = packet.getIntValues("mode")
     if not result:
-        errorLog("exception 234", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+        errorLog("exception 225", "패킷 데이터가 올바르지 않습니다", "data", packet.data)
+        closeRoom(useAlert = False, stay = True)
         return
     gameMode = GameMode(mode)
 
@@ -862,6 +863,7 @@ def enterRoom(_ip, _port):
     finally:
         packetPoolLock.release()
     gameType = GameType.Network
+    gameMode = GameMode(mode)
 
     t = threading.Thread(target=runPacketListener, daemon=True)
     t.start()
@@ -973,11 +975,29 @@ class Cell:
         self.state = state
         self.color = color
 
+    def apply(self, cell):
+        self.state = cell.state
+        self.color = cell.color
+        self.effect = cell.effect
+
 #블럭 객체
 class Block:
     def __init__(self, originState, gamevalue, id, x = 0, 
                  dirZ = 1, dirX = 1, dirY = 1, color = (255, 0, 0)):
         self.originState = originState
+        for _x in range(0, len(originState)):
+            for _y in range(0, len(originState[0])):
+                if self.originState[_x][_y].state is CellState.Occupied:
+                    if gameType is GameType.Network and gameMode is GameMode.Fusion:
+                        #랜덤 이펙트 적용
+                        effectRan = self.gamevalue.random.randint(0, 99)
+                        cellEffect = CellEffect.Default
+                        for i in range(len(CELL_EFFECT_RATE) - 1, -1, -1):
+                            if effectRan < CELL_EFFECT_RATE[i]:
+                                cellEffect = CellEffect(i)
+                                break
+                        self.originState[_x][_y].effect = cellEffect
+                    self.originState[_x][_y].color = color
         self.x = x
         self.y = 0
         self.dirX = dirX
@@ -1123,7 +1143,7 @@ class Block:
                     if self.curState[x][y] is CellState.Occupied:
                         if x + self.x < 0 or x + self.x >= HORIZONTAL_CELL_COUNT or y + self.y < 0 or y + self.y > VERTICAL_CELL_COUNT:
                             continue
-                        self.gamevalue.cells[x + self.x][y + self.y].changeState(CellState.Occupied, self.color)
+                        self.gamevalue.cells[x + self.x][y + self.y].apply(self.curState[x][y])
         finally:
             self.gamevalue.cellLock.release()
         
@@ -1963,10 +1983,16 @@ class GameManager:
                                           CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
                                           CELL_SIZE - offsetX, CELL_SIZE - offsetY))
                     else:
-                        pygame.draw.rect(screen, self.gamevalue.cells[x][y].color, 
-                                         resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0],
-                                          CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
-                                          CELL_SIZE - offsetX, CELL_SIZE - offsetY))
+                        if self.gamevalue.cells[x][y].effect is CellEffect.Default:
+                            pygame.draw.rect(screen, self.gamevalue.cells[x][y].color, 
+                                            resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0],
+                                            CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
+                                            CELL_SIZE - offsetX, CELL_SIZE - offsetY))
+                        else:
+                            pygame.draw.rect(screen, self.gamevalue.cells[x][y].color + (50, 50,), 
+                                            resizeAll(CELL_SIZE * x + self.gamevalue.GAME_SCREEN_OFFSET[0],
+                                            CELL_SIZE * y + self.gamevalue.GAME_SCREEN_OFFSET[1], 
+                                            CELL_SIZE - offsetX, CELL_SIZE - offsetY))
             
             #페이크 블럭 그리기
             if not self.gamevalue.fakeBlock is None:
